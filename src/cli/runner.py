@@ -1,5 +1,8 @@
 from pathlib import Path
 from src.core.cleaner import IntelligentDataCleaner
+from src.core.logging_config import setup_logging
+
+
 
 def main() -> None:
     """
@@ -16,7 +19,9 @@ def main() -> None:
        - Open output files automatically.
     """
     project_dir: Path = Path.cwd()
-    cleaner: IntelligentDataCleaner = IntelligentDataCleaner(base_dir=project_dir)
+    setup_logging(project_dir)
+
+    cleaner = IntelligentDataCleaner(base_dir=project_dir)
 
     # Process all files in raw_data folder
     for file in cleaner.raw_dir.glob("*.*"):
