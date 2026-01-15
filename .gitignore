@@ -227,8 +227,10 @@ exports/
 *.secret
 *.key
 .DS_Store
+
 #Logs
-logs/
+logs/*
+!logs/.gitkeep
 *.logs
 
 
