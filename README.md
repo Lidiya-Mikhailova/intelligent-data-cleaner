@@ -13,9 +13,48 @@ The pipeline processes CSV, TXT, and PDF inputs, applies text normalization, rem
 - Outputs: CSV, XLSX, TXT, PDF
 - Modular architecture for easy extension
 
-## Project Structure
+# Intelligent Data Cleaner
+
+A modular Python project for cleaning, normalizing, and deduplicating semi-structured data.
+
+The pipeline processes CSV, TXT, and PDF inputs, applies text normalization, removes strict duplicates, and exports cleaned results to multiple formats.
+
+## Features
+
+- Text normalization (Unicode normalization, control character removal, formatting)
+- Strict duplicate removal across rows
+- Chunk-based processing for large files
+- Inputs: CSV, TXT, PDF
+- Outputs: CSV, XLSX, TXT, PDF
+- Modular architecture for easy extension
+
+## Example
+
+This repository contains a small, safe example input file:
+
+- `examples/input/sample.txt`
+
+### Run with the example
+
+1. Copy the example file to `raw_data/`:
+   ```bash 
+   cp examples/input/sample.txt raw_data/
+   
+   
+2. Run the data cleaning pipeline:
+    ```bash
+   python -m src.cli.runner
+
+3. Check generated files in the output directory:
+   ```bash
+   ls -la output/
+    
+    
+
+
 
 ```text
+
 intelligent-data-cleaner
 ├── src/
 │   ├── cli/            # entry point

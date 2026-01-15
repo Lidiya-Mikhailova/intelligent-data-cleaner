@@ -1,0 +1,67 @@
+ID , Name , Age , Email , Address , Notes
+1 , john doe , 25 , JOHN.DOE@@example.com , 123 Main St. Apt #5 , likes pizza\
+2 , Jane SMITH , 30 , jane_smith@@example.COM , 456 Elm St. , enjoys hiking\
+3 , bob  brown , 22 , bob.brown@example..com , 789 Pine St. , vegetarian\
+4 , Alice O'Conner , 27 , alice.o'conner@example,com , 321 Oak St , speaks French\
+5 , JOHN DOE , 25 , john.doe@example.com , 123 Main St. Apt #5 , duplicate entry\
+6 , michael , 35 , michael123@@example.com , 555 Maple Rd , none\
+7 , emily  Davis , 29 , emily.davis@example.com , 678 Birch Rd , likes cats\
+8 , James , 40 , james@@example.com , 890 Cedar Ln , loves coding\
+9 , SOPHIA lee , 33 , sophia.lee@example..com , 111 Spruce St , traveller\
+10 , William , 31 , william..wright@example.com , 222 Walnut Ave , gamer\
+\
+11 , extra text;;;;; random $$$%%% symbols^^^ , , , ,\
+12 ,     multiple     spaces     here , , , ,\
+13 , UPPERCASE lowerCASE MixedCase , , , ,\
+14 , duplicate duplicate duplicate , , , ,\
+15 , 1234567890 numbers here 0987654321 , , , ,\
+16 , emails wrong@@example..com, missing@at.com, @missing.com , , , ,\
+17 , names with-dashes, hyphenated-names, apostrophes O'Neil , , , ,\
+18 , line breaks , , , ,\
+19 , next line , , , ,\
+20 , another    line , , , ,\
+21 , more lines  , more data , here , ,\
+22 , special chars !@#$%^&*()_+[]\{\}|;':",.<>?/ , , , ,\
+23 , tab    separated    values , , , ,\
+24 ,   trailing spaces   , , , ,\
+25 , leading spaces   , , , ,\
+26 , mixed , commas , and ; semicolons ; , , , ,\
+27 , random CAPSLOCK words HERE THERE EVERYWHERE , , , ,\
+28 , Accents \'e9\'e0\'fc\'f4\'ee \'f1\'e7 , , , ,\
+29 , Unicode characters
+\f1 \uc0\u55357 \u56333 \u55357 \u56960 \u10024
+\f2
+\f0 , , , ,\
+30 , repeated john doe , 25 , john.doe@@example.com , 123 Main St. Apt #5 , repeat\
+31 , repeated John DOE , 25 , john.doe@@example.com , 123 Main St. Apt #5 , repeat again\
+32 , strange spacing   around names , 28 , weird@example.com , 12 Strange Rd , notes\
+33 , numbers mixed with letters a1b2c3 , 22 , alpha123@@mail.com , 99 Test St , misc\
+34 , emoji in name
+\f1 \uc0\u55357 \u56846 \u55358 \u56809
+\f2
+\f0 , 31 , cool@example.com , 55 Fun Ln , fun\
+35 , misFORMATTED email , , wrong@@example..com , , broken\
+36 , mixed delimiters , commas; semicolons , 30 , mix@example.com , 123 Mix St , test\
+37 , extra  spaces  everywhere   , , , , ,\
+38 , weird\'97dash\'97characters , , , , ,\
+39 , line\
+breaks\
+everywhere , , , , ,\
+40 , tabs	and	spaces , , , , ,\
+\
+41 , duplicate line , 25 , dupe@example.com , 111 Dupe St , dupe\
+42 , duplicate line , 25 , dupe@example.com , 111 Dupe St , dupe\
+43 , duplicate line , 25 , dupe@example.com , 111 Dupe St , dupe\
+44 , CAPS LOCK NAME , 29 , caps@example.com , 44 Upper Ave , loud\
+45 , mixed Case Name , 29 , mixed@example.com , 44 Upper Ave , loud\
+46 , trailing,,,commas,,, , , , , ,\
+47 , leading,,,commas,,, , , , , ,\
+48 , weird_characters_!@# , , , , ,\
+49 , multiple\
+line\
+breaks , , , , ,\
+50 , final line
+\f1 \uc0\u55356 \u57281
+\f2
+\f0 , 50 , final@example.com , 500 End Rd , done\
+}
