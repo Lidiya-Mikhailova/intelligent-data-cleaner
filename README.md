@@ -48,6 +48,10 @@ This repository contains a small, safe example input file:
 3. Check generated files in the output directory:
    ```bash
    ls -la output/
+   
+4. Check logs:
+   - `logs/data_cleaner.log`
+
     
     
 
@@ -60,7 +64,7 @@ intelligent-data-cleaner
 │   ├── core/           # orchestration
 │   ├── io/             # readers/writers/openers
 │   └── processing/     # normalization and deduplication
-│
+├── logs/               # runtime logs (tracked only with .gitkeep; *.log ignored)
 ├── examples/
 │   └── input/
 │       └── sample.txt  # safe demo input
