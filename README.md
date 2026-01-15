@@ -54,13 +54,16 @@ This repository contains a small, safe example input file:
 
 
 ```text
-
 intelligent-data-cleaner
 ├── src/
 │   ├── cli/            # entry point
 │   ├── core/           # orchestration
 │   ├── io/             # readers/writers/openers
 │   └── processing/     # normalization and deduplication
+│
+├── examples/
+│   └── input/
+│       └── sample.txt  # safe demo input
 │
 ├── raw_data/           # local input (ignored)
 ├── output/             # local output (ignored)
