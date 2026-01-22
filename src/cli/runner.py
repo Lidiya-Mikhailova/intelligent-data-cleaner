@@ -1,31 +1,64 @@
-from pathlib import Path
-from src.core.cleaner import IntelligentDataCleaner
-from src.core.logging_config import setup_logging
+from __future__ import annotations
 
+import argparse
+from pathlib import Path
+
+from src.core.cleaner import IntelligentDataCleaner, OutputFormats
+from src.io.opener import open_file
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="intelligent-data-cleaner",
+        description="Clean, normalize and deduplicate raw data files.",
+    )
+
+    parser.add_argument(
+        "--base-dir",
+        type=str,
+        default=".",
+        help="Project base directory (default: current folder).",
+    )
+
+    parser.add_argument(
+        "--formats",
+        nargs="*",
+        default=None,
+        help=(
+            "Which outputs to generate. Examples: "
+            "csv safe_csv xlsx txt pdf json jsonl. "
+            "If omitted -> generate all."
+        ),
+    )
+
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open generated files after saving (only the selected formats).",
+    )
+
+    return parser
 
 
 def main() -> None:
-    """
-    Entry point for the Intelligent Data Cleaner CLI.
+    parser = build_parser()
+    args = parser.parse_args()
 
-    Responsibilities:
-    1. Initialize the cleaner with the current project directory.
-    2. Iterate over all files in the raw data folder.
-    3. Process each file through the cleaning pipeline:
-       - Load CSV, TXT, or PDF files.
-       - Clean and normalize data.
-       - Deduplicate rows.
-       - Save results in multiple formats (CSV, Excel, TXT, PDF)
-       - Open output files automatically.
-    """
-    project_dir: Path = Path.cwd()
-    setup_logging(project_dir)
+    base_dir = Path(args.base_dir).resolve()
+    cleaner = IntelligentDataCleaner(base_dir=base_dir)
 
-    cleaner = IntelligentDataCleaner(base_dir=project_dir)
+    formats = OutputFormats.from_iter(args.formats)
 
-    # Process all files in raw_data folder
-    for file in cleaner.raw_dir.glob("*.*"):
-        cleaner.process_file(file)
+    raw_dir = base_dir / "raw_data"
+    for file in raw_dir.glob("*.*"):
+        if file.name.startswith("."):
+            continue
+
+        generated = cleaner.process_file(file, formats=formats)
+
+        if args.open:
+            for p in generated:
+                open_file(p)
 
 
 if __name__ == "__main__":

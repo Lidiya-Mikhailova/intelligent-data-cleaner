@@ -217,21 +217,28 @@ output/
 reports/
 exports/
 
-# Logs
-*.log
 
 # Local secrets & runtime configs
+.env
 .env.local
 .env.dev
 .env.prod
 *.secret
 *.key
+
+#OS
 .DS_Store
 
 #Logs
+*.log
 logs/*
 !logs/.gitkeep
-*.logs
+.venv/
+
+logs/*.log
+__pycache__/
+
+fonts/
 
 
 

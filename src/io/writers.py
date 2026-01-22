@@ -1,8 +1,14 @@
+from __future__ import annotations
+
+import logging
 import re
 from pathlib import Path
 from typing import List
+
 import pandas as pd
 from fpdf import FPDF
+
+logger = logging.getLogger(__name__)
 
 
 def save_csv(df: pd.DataFrame, path: Path) -> None:
@@ -11,7 +17,7 @@ def save_csv(df: pd.DataFrame, path: Path) -> None:
 
 
 def save_csv_safe(df: pd.DataFrame, path: Path) -> None:
-    """Save a human-readable CSV-like text file with fixed-width columns."""
+    """Save a human-readable fixed-width text file (CSV-like)."""
     columns: List[str] = df.columns.tolist()
     widths = [max(df[c].astype(str).map(len).max(), len(c)) + 4 for c in columns]
 
@@ -51,37 +57,60 @@ def save_txt(df: pd.DataFrame, path: Path) -> None:
             f.write(line + "\n")
 
 
-def save_pdf(df: pd.DataFrame, path: Path, font_path: Path | None = None) -> None:
+def save_json(df: pd.DataFrame, path: Path) -> None:
     """
-    Save DataFrame as PDF.
+    Save DataFrame as a regular JSON array (records).
+    """
+    df.to_json(path, orient="records", force_ascii=False, indent=2)
+    logger.info("Saved JSON: %s", path)
 
-    Args:
-        df (pd.DataFrame): DataFrame to save.
-        path (Path): Output PDF path.
-        font_path (Path | None): Optional custom font path.
+
+def save_jsonl(df: pd.DataFrame, path: Path) -> None:
     """
+    Save DataFrame as JSON Lines.
+    """
+    df.to_json(path, orient="records", lines=True, force_ascii=False)
+    logger.info("Saved JSONL: %s", path)
+
+
+def save_pdf(df: pd.DataFrame, path: Path, font_path: Path | None = None) -> None:
+    """Save DataFrame as PDF."""
     pdf = FPDF(format="A4", unit="mm")
     pdf.add_page()
     pdf.set_margins(10, 10, 10)
     pdf.set_auto_page_break(auto=True, margin=15)
 
+    def _pdf_safe_text(x: object) -> str:
+        s = "" if x is None else str(x)
+        s = s.replace("\u2022", "-")
+        s = s.replace("\u2013", "-")
+        s = s.replace("\u2014", "-")
+        s = s.replace("\u2018", "'")
+        s = s.replace("\u2019", "'")
+        s = s.replace("\u201c", '"')
+        s = s.replace("\u201d", '"')
+        s = s.replace("\u00A0", " ")
+        return s
+
     if font_path and font_path.exists():
-        pdf.add_font("DejaVu", "", str(font_path))
+        pdf.add_font("DejaVu", "", str(font_path), uni=True)
         pdf.set_font("DejaVu", size=6)
+        logger.info("PDF font: DejaVu (%s)", font_path)
     else:
         pdf.set_font("Arial", size=6)
+        logger.warning("PDF font fallback: Arial (font not found). Unicode may fail")
 
     cols = df.columns.tolist()
     page_width = pdf.w - pdf.l_margin - pdf.r_margin
-    col_width = page_width / len(cols)
+    col_width = page_width / max(len(cols), 1)
 
     for c in cols:
-        pdf.cell(col_width, 4, c, border=1, align="C")
+        pdf.cell(col_width, 4, _pdf_safe_text(c), border=1, align="C")
     pdf.ln(4)
 
     for row in df.itertuples(index=False):
         for v in row:
-            pdf.cell(col_width, 4, str(v), border=1)
+            pdf.cell(col_width, 4, _pdf_safe_text(v), border=1)
         pdf.ln(4)
 
     pdf.output(str(path))

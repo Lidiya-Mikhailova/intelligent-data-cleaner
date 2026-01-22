@@ -1,19 +1,28 @@
 import os
 import platform
+import subprocess
 from pathlib import Path
 
 
 def open_file(path: Path) -> None:
     """
-    Open a file with the default application according to the OS.
+    Open a file with a sensible default app.
 
-    Args:
-        path (Path): File path to open.
+    On macOS, JSON/JSONL are opened with TextEdit to avoid
+    "No application knows how to open URL" errors.
     """
     system = platform.system()
+    suffix = path.suffix.lower()
+
     if system == "Darwin":
-        os.system(f'open "{path}"')
+        # Force a text editor for text-like outputs
+        if suffix in {".txt", ".json", ".jsonl", ".csv"}:
+            subprocess.run(["open", "-a", "TextEdit", str(path)], check=False)
+        else:
+            subprocess.run(["open", str(path)], check=False)
+
     elif system == "Windows":
-        os.startfile(path)
+        os.startfile(path)  # type: ignore[attr-defined]
+
     elif system == "Linux":
-        os.system(f'xdg-open "{path}"')
+        subprocess.run(["xdg-open", str(path)], check=False)
