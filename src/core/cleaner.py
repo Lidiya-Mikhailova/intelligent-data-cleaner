@@ -8,7 +8,12 @@ from typing import Iterable, List, Optional
 import pandas as pd
 
 from src.processing.dataframe import clean_df
-from src.io.readers import load_csv_chunks, read_pdf_chunks, read_json_chunks
+from src.io.readers import (
+    load_csv_chunks,
+    read_txt_chunks,
+    read_pdf_chunks,
+    read_json_chunks,
+)
 from src.io.writers import (
     save_csv,
     save_csv_safe,
@@ -83,9 +88,14 @@ class IntelligentDataCleaner:
         formats = formats or OutputFormats()
         suffix = file.suffix.lower()
 
-        # ---- Read input ----
-        if suffix in {".csv", ".txt"}:
+        # ---- Read input (IMPORTANT: txt is NOT read via read_csv) ----
+        if suffix == ".csv":
             chunks = [clean_df(chunk) for chunk in load_csv_chunks(file)]
+            df = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
+
+        elif suffix == ".txt":
+            # TXT should be treated as text and parsed into structured rows
+            chunks = [clean_df(chunk) for chunk in read_txt_chunks(file)]
             df = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
 
         elif suffix == ".pdf":
@@ -97,6 +107,7 @@ class IntelligentDataCleaner:
             df = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
 
         else:
+            # unsupported
             return []
 
         # ---- Output base name ----
@@ -129,7 +140,6 @@ class IntelligentDataCleaner:
 
         if formats.pdf:
             p = base_path.with_suffix(".pdf")
-            # If you want to pass a font path later, do it here
             save_pdf(df, p, font_path=None)
             generated.append(p)
 

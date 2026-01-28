@@ -13,6 +13,13 @@ def build_parser() -> argparse.ArgumentParser:
         description="Clean, normalize and deduplicate raw data files.",
     )
 
+    # ВАЖНО: входной файл
+    parser.add_argument(
+        "input_file",
+        type=str,
+        help="Path to input file (.csv/.txt/.pdf/.json/.jsonl).",
+    )
+
     parser.add_argument(
         "--base-dir",
         type=str,
@@ -40,26 +47,39 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
     base_dir = Path(args.base_dir).resolve()
-    cleaner = IntelligentDataCleaner(base_dir=base_dir)
+    input_file = Path(args.input_file).expanduser().resolve()
+
+    if not input_file.exists():
+        print(f"ERROR: input file not found: {input_file}")
+        return 2
 
     formats = OutputFormats.from_iter(args.formats)
 
-    raw_dir = base_dir / "raw_data"
-    for file in raw_dir.glob("*.*"):
-        if file.name.startswith("."):
-            continue
+    cleaner = IntelligentDataCleaner(base_dir=base_dir)
+    generated = cleaner.process_file(input_file, formats=formats)
 
-        generated = cleaner.process_file(file, formats=formats)
+    if not generated:
+        print("No outputs generated (unsupported file type or empty input).")
+        return 1
 
-        if args.open:
-            for p in generated:
+    print("Generated files:")
+    for p in generated:
+        print(f"- {p}")
+
+    if args.open:
+        for p in generated:
+            try:
                 open_file(p)
+            except Exception as e:
+                print(f"Could not open {p}: {e}")
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
