@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import zipfile
 from pathlib import Path
 from typing import List
 
@@ -10,24 +11,74 @@ from fpdf import FPDF
 
 logger = logging.getLogger(__name__)
 
+_PDF_EMOJI_MAP = {
+    "\U0001f4a9": "[poo]",
+    "\U0001f525": "[fire]",
+    "\U0001f308": "[rainbow]",
+    "\U0001f30d": "[globe]",
+}
+_PDF_GREEK_MAP = {
+    "\u0376": "\u03dc",
+    "\u035a": "\u1fbf",
+    "\u037d": "",
+    "\u0371": "\u03b7",
+}
+
+
+NUMERIC_COLS = {"ID", "Age"}
+MAX_COL_WIDTH = 60
+
+
+def _col_widths(df: pd.DataFrame) -> list[int]:
+    return [min(max(df[c].astype(str).map(len).max(), len(c)) + 2, MAX_COL_WIDTH) for c in df.columns]
+
+
+def _align(v: object, width: int, col_name: str) -> str:
+    s = str(v)
+    if len(s) > width:
+        s = s[: width - 1] + "…"
+    if col_name in NUMERIC_COLS:
+        return s.rjust(width)
+    return s.ljust(width)
+
 
 def save_csv(df: pd.DataFrame, path: Path) -> None:
-    """Save DataFrame to CSV with UTF-8 encoding and semicolon separator."""
-    df.to_csv(path, index=False, encoding="utf-8", sep=";")
+    """Save DataFrame to aligned CSV with visible column separation."""
+    widths = _col_widths(df)
+    sep = " │ "
+
+    with open(path, "w", encoding="utf-8") as f:
+        header = sep.join(_align(c, w, c) for c, w in zip(df.columns, widths))
+        f.write(header + "\n")
+        f.write("─" * len(header) + "\n")
+
+        for _, row in df.iterrows():
+            line = sep.join(_align(row[c], w, c) for c, w in zip(df.columns, widths))
+            f.write(line + "\n")
+
+    logger.info("Saved aligned CSV: %s", path.name)
 
 
 def save_csv_safe(df: pd.DataFrame, path: Path) -> None:
-    """Save a human-readable fixed-width text file (CSV-like)."""
-    columns: List[str] = df.columns.tolist()
-    widths = [max(df[c].astype(str).map(len).max(), len(c)) + 4 for c in columns]
+    """Save a human-readable fixed-width text file with table borders."""
+    widths = _col_widths(df)
+    sep = " │ "
+    top = "┌" + "┬".join("─" * w for w in widths) + "┐"
+    head_sep = "├" + "┼".join("─" * w for w in widths) + "┤"
+    bottom = "└" + "┴".join("─" * w for w in widths) + "┘"
 
     with open(path, "w", encoding="utf-8") as f:
-        header = "".join(c.ljust(w) for c, w in zip(columns, widths))
-        f.write(header + "\n")
-        f.write("=" * len(header) + "\n")
-        for row in df.itertuples(index=False):
-            line = "".join(str(v).ljust(w) for v, w in zip(row, widths))
+        f.write(top + "\n")
+        f.write(sep.join(_align(c, w, c) for c, w in zip(df.columns, widths)) + "\n")
+        f.write(head_sep + "\n")
+
+        for _, row in df.iterrows():
+            line = sep.join(_align(row[c], w, c) for c, w in zip(df.columns, widths))
             f.write(line + "\n")
+
+        f.write(bottom + "\n")
+
+    logger.info("Saved safe CSV: %s", path.name)
 
 
 def save_excel(df: pd.DataFrame, path: Path) -> None:
@@ -41,20 +92,20 @@ def save_excel(df: pd.DataFrame, path: Path) -> None:
 
 
 def save_txt(df: pd.DataFrame, path: Path) -> None:
-    """Save DataFrame as TXT with fixed-width columns and sanitized text."""
-    columns = df.columns.tolist()
-    widths = [max(df[c].astype(str).map(len).max(), len(c)) + 4 for c in columns]
+    """Save DataFrame as TXT with fixed-width columns and visible separators."""
+    widths = _col_widths(df)
+    sep = " │ "
 
     with open(path, "w", encoding="utf-8") as f:
-        header = "".join(c.ljust(w) for c, w in zip(columns, widths))
+        header = sep.join(_align(c, w, c) for c, w in zip(df.columns, widths))
         f.write(header + "\n")
-        f.write("=" * len(header) + "\n")
-        for row in df.itertuples(index=False):
-            line = "".join(
-                re.sub(r"[^\w\s\.\-@А-Яа-яЁё]", "", str(v)).ljust(w)
-                for v, w in zip(row, widths)
-            )
+        f.write("═" * len(header) + "\n")
+
+        for _, row in df.iterrows():
+            line = sep.join(_align(row[c], w, c) for c, w in zip(df.columns, widths))
             f.write(line + "\n")
+
+    logger.info("Saved aligned TXT: %s", path.name)
 
 
 def save_json(df: pd.DataFrame, path: Path) -> None:
@@ -89,16 +140,30 @@ def save_pdf(df: pd.DataFrame, path: Path, font_path: Path | None = None) -> Non
         s = s.replace("\u2019", "'")
         s = s.replace("\u201c", '"')
         s = s.replace("\u201d", '"')
-        s = s.replace("\u00A0", " ")
+        s = s.replace("\u00a0", " ")
+        for old, new in _PDF_EMOJI_MAP.items():
+            s = s.replace(old, new)
+        for old, new in _PDF_GREEK_MAP.items():
+            s = s.replace(old, new)
+        s = re.sub(r"[^\u0000-\uFFFF]", "", s)
         return s
 
-    if font_path and font_path.exists():
-        pdf.add_font("DejaVu", "", str(font_path), uni=True)
-        pdf.set_font("DejaVu", size=6)
-        logger.info("PDF font: DejaVu (%s)", font_path)
+    if font_path:
+        arial_unicode = font_path.parent.parent / "Arial Unicode.ttf"
+        if arial_unicode.exists():
+            pdf.add_font("ArialUnicode", "", str(arial_unicode), uni=True)
+            pdf.set_font("ArialUnicode", size=6)
+            logger.info("PDF font: Arial Unicode MS (%s)", arial_unicode)
+        elif font_path.exists():
+            pdf.add_font("DejaVu", "", str(font_path), uni=True)
+            pdf.set_font("DejaVu", size=6)
+            logger.info("PDF font: DejaVu (%s)", font_path)
+        else:
+            pdf.set_font("Arial", size=6)
+            logger.warning("PDF font fallback: Arial. Unicode may fail")
     else:
         pdf.set_font("Arial", size=6)
-        logger.warning("PDF font fallback: Arial (font not found). Unicode may fail")
+        logger.warning("PDF font fallback: Arial (not found). Unicode may fail")
 
     cols = df.columns.tolist()
     page_width = pdf.w - pdf.l_margin - pdf.r_margin
@@ -114,3 +179,15 @@ def save_pdf(df: pd.DataFrame, path: Path, font_path: Path | None = None) -> Non
         pdf.ln(4)
 
     pdf.output(str(path))
+
+
+def save_zip(files: List[Path], output_path: Path) -> Path:
+    """
+    Package multiple files into a ZIP archive.
+    Returns the path to the created ZIP.
+    """
+    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            zf.write(f, arcname=f.name)
+    logger.info("Saved ZIP: %s", output_path)
+    return output_path

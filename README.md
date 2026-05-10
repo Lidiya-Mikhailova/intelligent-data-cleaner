@@ -1,90 +1,130 @@
 # Intelligent Data Cleaner
 
-A modular Python project for cleaning, normalizing, and deduplicating semi-structured data.
-
-The pipeline processes CSV, TXT, JSON, JSONL, and text-based PDF inputs, applies text normalization and strict deduplication, and exports cleaned data to multiple formats.
+Drop a dirty file (CSV, TXT, JSON, PDF) into the pipeline and get cleaned, deduplicated output in any format. Medallion architecture (Bronze → Silver → Gold) with DuckDB persistence and full replayability.
 
 ## Features
 
-- Text normalization (Unicode normalization, control character removal, formatting)
-- Strict duplicate removal across rows
-- Chunk-based processing for large files
-- Inputs: CSV, TXT, JSON, JSONL, PDF (text-based)
-- Outputs: CSV, SAFE_CSV, XLSX, TXT, PDF, JSON, JSONL
-- Modular architecture for easy extension
-- Optional auto-open of generated files (`--open`)
+- **Input:** CSV, TXT, JSON, JSONL, XLSX, PDF (text + scanned via OCR), ZIP
+- **Output:** CSV, safe_csv, XLSX, TXT, PDF, JSON, JSONL, ZIP
+- **Pipeline:** Ingest → Extract → Normalize → Clean → Deduplicate → Translate → Enrich → Export
+- **Validation:** Pydantic-based: records split into VALID / INVALID / QUARANTINE with error preservation
+- **Deduplication:** Exact + fuzzy (rapidfuzz), configurable threshold
+- **OCR:** Tesseract-based with auto-detection of scanned PDFs
+- **Translation:** Google Translate (deep-translator) with Null fallback
+- **Replayability:** All intermediate results preserved — replay from any stage, reprocess invalid records, rebuild from bronze
+- **Fluent API:** `Document.from_file(path).normalize().clean().deduplicate().export("csv")`
 
-## Notes / Limitations
+## Installation
 
-- Scanned PDFs (image-based) require OCR. The OCR/scanner step is optional and may be added later.
-
-## Example
-
-This repository contains a small, safe example input file:
-
-- `examples/input/sample.txt`
-
-### Run with the example
-
-1.Copy the example file to `raw_data/`:
 ```bash
-cp examples/input/sample.txt raw_data/
+pip install -e .                     # library + idoc CLI (typer required: pip install -e .[cli])
+pip install -e .[all]                # everything including openpyxl
 ```
 
-2.Run the pipeline:
+## Quick Start
+
+### CLI (`idoc`)
+
 ```bash
-python -m src.cli.runner
+# Process file through Medallion pipeline (Bronze → Silver → Gold → Export)
+idoc process input.csv
+
+# Convert format (no cleaning)
+idoc convert input.pdf --to csv
+
+# OCR on scanned PDF
+idoc scan scan.pdf --export csv
+
+# Run a config-defined pipeline
+idoc run pipeline.yaml
+
+# Show file info
+idoc info input.json
+
+# List supported formats
+idoc formats
+
+# Replay from Silver layer
+idoc replay-silver input.csv
+
+# Reprocess invalid records
+idoc replay-invalid input.csv
+
+# Replay from a specific stage
+idoc replay-stage input.csv normalize
+
+# Rebuild from Bronze
+idoc rebuild input.csv
 ```
 
-3.Check generated files:
-```bash
-ls -la output/
+### Library
+
+```python
+from src import Document
+
+# Fluent pipeline
+doc = Document.from_file("bronze/dirty.csv")
+doc = doc.normalize().clean().deduplicate()
+doc.export("csv", output_path="output/clean.csv")
+
+# Full Medallion pipeline
+doc = Document.from_file("input.csv")
+paths = doc.process()
 ```
 
-4.Check logs (generated locally):
-```logs/data_cleaner.log```
-
-Usage
-
-Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-Put your input files into raw_data/, then run:
-```bash
-python -m src.cli.runner
-```
-
-Select output 
-
-Generate only specific output
-```bash
-python -m src.cli.runner --formats xlsx txt
-```
-Generate CSV + JSON +JSONL
-```bash
-python -m src.cli.runner --formats csv json jsonl
-```
-
-
-Project structure
-```
-intelligent-data-cleaner
-├── src/
-│   ├── cli/            # entry point
-│   ├── core/           # orchestration
-│   ├── io/             # readers/writers/openers (+ scanner utils)
-│   └── processing/
-├── examples/
-│   └── input/
-│       └── sample.txt
-├── raw_data/           # local input (ignored)
-├── output/             # local output (ignored)
-├── logs/               # runtime logs (tracked only with .gitkeep; *.log ignored)
-├── README.md
-├── requirements.txt
-└── .gitignore
+## Architecture
 
 ```
+Document API: from_file → normalize → clean → deduplicate → translate → export
+                    │
+┌───────────────────▼────────────────────────────────────┐
+│              Medallion Pipeline (DuckDB)                │
+│  Bronze (raw) ──▶ Silver (valid/invalid/quarantine) ──▶ Gold (final) ──▶ Export
+│                        │        │
+│                   VALID rows  INVALID rows (with errors)
+└────────────────────────────────────────────────────────┘
+```
 
+All layers are **append-only** — re-running preserves history.
 
+## Replayability
+
+| Method | What it does |
+|--------|-------------|
+| `replay_from_silver` | Load silver data, strip validation columns, re-run pipeline |
+| `reprocess_invalid` | Load invalid records, strip errors, re-validate |
+| `replay_stage` | Load a specific stage checkpoint, run remaining stages |
+| `rebuild_pipeline` | Load bronze data, re-run full pipeline |
+
+## Project Structure
+
+```
+src/
+├── cli/              # Typer CLI (app.py) + argparse CLI (runner.py) + console helpers
+├── core/             # Orchestration: cleaner.py (IntelligentDataCleaner), export_service.py, validation.py
+├── database/         # DuckDB layers: bronze.py, silver.py, gold.py, export.py, pipeline_runs.py, connection.py
+├── document.py       # Document class — the only public API
+├── exporters/        # registry.py with 8 exporters (CSV, JSON, JSONL, XLSX, TXT, PDF, safe_csv)
+├── io/               # readers.py, writers.py, ocr.py
+├── normalization/    # Pipeline framework: pipeline.py, stages.py, text.py, structural.py, deduplication.py
+├── translation/      # engine.py
+├── validation/       # models.py (SilverRecord)
+└── visualization/    # render.py, reports.py
+```
+
+## Output Formats
+
+| Flag | Description |
+|------|-------------|
+| `csv` | UTF-8 CSV |
+| `safe_csv` | Fixed-width human-readable CSV |
+| `xlsx` | Excel workbook with auto-sized columns |
+| `txt` | Fixed-width table |
+| `pdf` | A4 PDF with DejaVu Sans / Arial Unicode |
+| `json` | Pretty-printed JSON array |
+| `jsonl` | JSON Lines (one object per line) |
+| `zip` | Archive of all exported files |
+
+## License
+
+MIT

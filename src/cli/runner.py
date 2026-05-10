@@ -3,46 +3,39 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from src.core.cleaner import IntelligentDataCleaner, OutputFormats
-from src.io.opener import open_file
+from src.cli.console import (
+    ask_file_choice,
+    ask_formats,
+    ask_mode,
+    list_raw_files,
+    open_generated,
+    print_file_menu,
+    print_gold_menu,
+)
+from src.document import Document
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="intelligent-data-cleaner",
-        description="Clean, normalize and deduplicate raw data files.",
+        description="Clean, normalize and deduplicate raw data files with Medallion architecture (DuckDB).",
     )
 
-    # ВАЖНО: входной файл
-    parser.add_argument(
-        "input_file",
-        type=str,
-        help="Path to input file (.csv/.txt/.pdf/.json/.jsonl).",
-    )
+    sub = parser.add_subparsers(dest="command")
 
-    parser.add_argument(
-        "--base-dir",
-        type=str,
-        default=".",
-        help="Project base directory (default: current folder).",
-    )
+    process_p = sub.add_parser("process", help="Process a file through bronze -> silver -> gold")
+    process_p.add_argument("input_file", type=str, help="Path to input file")
+    process_p.add_argument("--formats", nargs="*", default=None, help="Export formats (default: all)")
 
-    parser.add_argument(
-        "--formats",
-        nargs="*",
-        default=None,
-        help=(
-            "Which outputs to generate. Examples: "
-            "csv safe_csv xlsx txt pdf json jsonl. "
-            "If omitted -> generate all."
-        ),
-    )
+    list_p = sub.add_parser("list", help="List datasets in the database")
+    list_p.add_argument("layer", choices=["bronze", "silver", "gold"], nargs="?", default="gold")
 
-    parser.add_argument(
-        "--open",
-        action="store_true",
-        help="Open generated files after saving (only the selected formats).",
-    )
+    export_p = sub.add_parser("export", help="Export a gold table to files")
+    export_p.add_argument("table", type=str, help="Gold table name")
+    export_p.add_argument("--formats", nargs="*", default=None, help="Export formats")
+
+    clean_p = sub.add_parser("clean", help="Clean all files in bronze/")
+    clean_p.add_argument("--formats", nargs="*", default=None, help="Export formats (default: all)")
 
     return parser
 
@@ -51,33 +44,112 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    base_dir = Path(args.base_dir).resolve()
-    input_file = Path(args.input_file).expanduser().resolve()
+    base_dir = Path(".").resolve()
+    Document.setup_logging(base_dir)
 
-    if not input_file.exists():
-        print(f"ERROR: input file not found: {input_file}")
-        return 2
+    command = getattr(args, "command", None)
 
-    formats = OutputFormats.from_iter(args.formats)
+    if command == "list":
+        df = Document.list_tables(layer=args.layer, base_dir=str(base_dir))
+        if df.empty:
+            print(f"No {args.layer} tables found.")
+            return 0
+        if args.layer == "gold":
+            print_gold_menu(df)
+        else:
+            print(df.to_string(index=False))
+        return 0
 
-    cleaner = IntelligentDataCleaner(base_dir=base_dir)
-    generated = cleaner.process_file(input_file, formats=formats)
+    if command == "export":
+        paths = Document.export_table(args.table, base_dir=str(base_dir), formats=args.formats)
+        if not paths:
+            print("Nothing exported.")
+            return 1
+        print(f"\nExported {len(paths)} file(s):\n")
+        for p in paths:
+            print(f"  {p.name}")
+        open_generated(paths)
+        return 0
 
-    if not generated:
-        print("No outputs generated (unsupported file type or empty input).")
+    if command == "clean":
+        paths = Document.process_all(base_dir=str(base_dir), formats=args.formats)
+        if not paths:
+            print("No outputs generated.")
+            return 1
+        print(f"\nDone! Generated {len(paths)} file(s):\n")
+        for p in paths:
+            print(f"  {p.name}")
+        open_generated(paths)
+        return 0
+
+    if command == "process":
+        input_file = Path(args.input_file).expanduser().resolve()
+        if not input_file.exists():
+            print(f"\nERROR: input file not found: {input_file}")
+            return 2
+        print(f"\nProcessing: {input_file.name}")
+        doc = Document.from_file(input_file)
+        paths = doc.process(base_dir=str(base_dir), formats=args.formats)
+        if not paths:
+            print("No outputs generated.")
+            return 1
+        print(f"\nDone! Generated {len(paths)} file(s):\n")
+        for p in paths:
+            print(f"  {p.name}")
+        open_generated(paths)
+        return 0
+
+    interactive_mode(base_dir, parser)
+    return 0
+
+
+def interactive_mode(base_dir: Path, parser: argparse.ArgumentParser) -> int:
+    files = list_raw_files(base_dir)
+    if not files:
+        print(f"\nNo supported files found in {base_dir / 'bronze'}/")
+        print("Place .csv, .txt, .pdf, .json, .jsonl, or .zip files there and try again.")
         return 1
 
-    print("Generated files:")
-    for p in generated:
-        print(f"- {p}")
-
-    if args.open:
-        for p in generated:
-            try:
-                open_file(p)
-            except Exception as e:
-                print(f"Could not open {p}: {e}")
-
+    while True:
+        print_file_menu(files)
+        input_file = ask_file_choice(files)
+        if input_file is None:
+            return 0
+        mode = ask_mode()
+        fmt_list = ask_formats()
+        action = "Converting" if mode == "convert" else "Processing"
+        print(f"\n{action}: {input_file.name}")
+        doc = Document.from_file(input_file)
+        if mode == "convert":
+            out_dir = base_dir / "output"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            paths = []
+            for fmt in fmt_list or ["csv"]:
+                out = out_dir / f"converted_{input_file.stem}.{fmt}"
+                result = doc.export(fmt, output_path=out)
+                if isinstance(result, Path):
+                    paths.append(result)
+        else:
+            paths = doc.process(base_dir=str(base_dir), formats=fmt_list)
+        if not paths:
+            print("No outputs generated (unsupported file type or empty input).")
+            return 1
+        print(f"\nDone! Generated {len(paths)} file(s):\n")
+        for p in paths:
+            print(f"  {p.name}")
+        open_generated(paths)
+        print()
+        print("=" * 60)
+        print("  Transform another file?")
+        print("=" * 60)
+        print()
+        print("  1. Yes, choose another file")
+        print("  2. No, finish")
+        print()
+        again = input("Select (1 or 2): ").strip()
+        if again != "1":
+            break
+        print()
     return 0
 
 
