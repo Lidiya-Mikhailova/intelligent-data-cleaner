@@ -2,6 +2,10 @@
 
 **load → clean → fix → pick a format → export**
 
+![CI](https://img.shields.io/github/actions/workflow/status/Lidiya-Mikhailova/intelligent-data-cleaner/ci.yml?branch=main&label=CI)
+![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13%20|%203.14-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 ```bash
 pip install -e ".[dev,all]"
 ```
