@@ -1,129 +1,151 @@
 # Intelligent Data Cleaner
 
-Drop a dirty file (CSV, TXT, JSON, PDF) into the pipeline and get cleaned, deduplicated output in any format. Medallion architecture (Bronze → Silver → Gold) with DuckDB persistence and full replayability.
-
-## Features
-
-- **Input:** CSV, TXT, JSON, JSONL, XLSX, PDF (text + scanned via OCR), ZIP
-- **Output:** CSV, safe_csv, XLSX, TXT, PDF, JSON, JSONL, ZIP
-- **Pipeline:** Ingest → Extract → Normalize → Clean → Deduplicate → Translate → Enrich → Export
-- **Validation:** Pydantic-based: records split into VALID / INVALID / QUARANTINE with error preservation
-- **Deduplication:** Exact + fuzzy (rapidfuzz), configurable threshold
-- **OCR:** Tesseract-based with auto-detection of scanned PDFs
-- **Translation:** Google Translate (deep-translator) with Null fallback
-- **Replayability:** All intermediate results preserved — replay from any stage, reprocess invalid records, rebuild from bronze
-- **Fluent API:** `Document.from_file(path).normalize().clean().deduplicate().export("csv")`
-
-## Installation
+**загрузил → почистил → поправил → выбрал формат → выгрузил**
 
 ```bash
-pip install -e .                     # library + idoc CLI (typer required: pip install -e .[cli])
-pip install -e .[all]                # everything including openpyxl
+pip install -e ".[dev,all]"
 ```
 
-## Quick Start
-
-### CLI (`idoc`)
-
-```bash
-# Process file through Medallion pipeline (Bronze → Silver → Gold → Export)
-idoc process input.csv
-
-# Convert format (no cleaning)
-idoc convert input.pdf --to csv
-
-# OCR on scanned PDF
-idoc scan scan.pdf --export csv
-
-# Run a config-defined pipeline
-idoc run pipeline.yaml
-
-# Show file info
-idoc info input.json
-
-# List supported formats
-idoc formats
-
-# Replay from Silver layer
-idoc replay-silver input.csv
-
-# Reprocess invalid records
-idoc replay-invalid input.csv
-
-# Replay from a specific stage
-idoc replay-stage input.csv normalize
-
-# Rebuild from Bronze
-idoc rebuild input.csv
-```
-
-### Library
+## Library API
 
 ```python
-from src import Document
+from src.document import Document
+```
 
-# Fluent pipeline
+### 1. Load
+
+```python
 doc = Document.from_file("bronze/dirty.csv")
-doc = doc.normalize().clean().deduplicate()
+doc = Document.from_file("data.txt")
+doc = Document.from_file("data.json")
+doc = Document.from_dict([{"Name": "John", "Age": 30}])
+doc = Document.from_text("Name: John\nAge: 30")
+```
+
+### 2. Clean
+
+```python
+doc = doc.normalize()           # encoding, whitespace, unicode
+doc = doc.clean()               # structural cleanup
+doc = doc.deduplicate()         # fuzzy dedup (default, rapidfuzz)
+doc = doc.deduplicate(fuzzy=True, threshold=85.0, subset=["Name", "Age"])
+doc = doc.translate(target="en")
+doc = doc.validate()            # DQ checks
+```
+
+### 3. Inspect & Fix
+
+```python
+# Посмотреть дубликаты (не удаляет!)
+dupes = doc.find_duplicates(fuzzy=False, subset=["Name", "Age"])
+print(dupes)
+
+# Удалить конкретные строки
+doc = doc.remove_rows([3, 7])
+doc = doc.keep_rows(lambda r: r["Name"] != "")
+
+# Посмотреть что удалил deduplicate
+print(doc.duplicates)
+print(doc.removed)  # строки, удалённые на этапе deduplicate
+
+# Классификация (VALID / INVALID / QUARANTINE)
+valid, invalid, quarantine = doc.classify()
+r = doc.review
+print(f"valid={r.rows_valid}, invalid={r.rows_invalid}, quarantine={r.rows_quarantine}")
+
+# Подозрительные строки (DQ warnings)
+print(doc.suspicious())
+print(doc.quarantine)
+```
+
+### 4. Export
+
+```python
+doc.export("csv", output_path="clean.csv")        # → Path
+doc.export("json", output_path="clean.json")
+doc.export("xlsx", output_path="clean.xlsx")
+doc.export("txt", output_path="clean.txt")
+doc.export("pdf", output_path="clean.pdf")
+doc.export("jsonl", output_path="clean.jsonl")
+doc.export("parquet", output_path="clean.parquet", compression="snappy")
+data = doc.export("csv")                           # → bytes
+```
+
+> Примечание: `doc.export("csv", output_path=...)` сохраняет CSV в выровненном
+> табличном виде (удобно для чтения человеком, но не стандартный CSV). Для
+> стандартного CSV используйте возврат байтов `data = doc.export("csv")`.
+
+### Preview
+
+```python
+print(doc.preview(rows=10))
+print(doc.report())
+```
+
+## CLI
+
+```bash
+idoc process input.csv                  # clean + dedup + export
+idoc process input.csv --no-deduplicate
+idoc process input.csv --translate en -e csv
+idoc convert input.pdf --to csv         # без очистки
+idoc info input.csv
+idoc formats
+```
+
+## Полный пример
+
+```python
+from src.document import Document
+
+doc = Document.from_file("bronze/dirty.csv")
+doc = doc.normalize().clean()
+
+# смотрим дубликаты
+print(doc.find_duplicates(fuzzy=False))
+
+# удаляем мусорную строку 7
+doc = doc.remove_rows(7)
+
+# дедуплицируем остальное
+doc = doc.deduplicate()
+
+# смотрим что удалилось
+print(doc.duplicates)
+
+# экспорт
 doc.export("csv", output_path="output/clean.csv")
-
-# Full Medallion pipeline
-doc = Document.from_file("input.csv")
-paths = doc.process()
 ```
 
-## Architecture
-
-```
-Document API: from_file → normalize → clean → deduplicate → translate → export
-                    │
-┌───────────────────▼────────────────────────────────────┐
-│              Medallion Pipeline (DuckDB)                │
-│  Bronze (raw) ──▶ Silver (valid/invalid/quarantine) ──▶ Gold (final) ──▶ Export
-│                        │        │
-│                   VALID rows  INVALID rows (with errors)
-└────────────────────────────────────────────────────────┘
-```
-
-All layers are **append-only** — re-running preserves history.
-
-## Replayability
-
-| Method | What it does |
-|--------|-------------|
-| `replay_from_silver` | Load silver data, strip validation columns, re-run pipeline |
-| `reprocess_invalid` | Load invalid records, strip errors, re-validate |
-| `replay_stage` | Load a specific stage checkpoint, run remaining stages |
-| `rebuild_pipeline` | Load bronze data, re-run full pipeline |
-
-## Project Structure
+## Directory Layout
 
 ```
 src/
-├── cli/              # Typer CLI (app.py) + argparse CLI (runner.py) + console helpers
-├── core/             # Orchestration: cleaner.py (IntelligentDataCleaner), export_service.py, validation.py
-├── database/         # DuckDB layers: bronze.py, silver.py, gold.py, export.py, pipeline_runs.py, connection.py
-├── document.py       # Document class — the only public API
-├── exporters/        # registry.py with 8 exporters (CSV, JSON, JSONL, XLSX, TXT, PDF, safe_csv)
-├── io/               # readers.py, writers.py, ocr.py
-├── normalization/    # Pipeline framework: pipeline.py, stages.py, text.py, structural.py, deduplication.py
-├── translation/      # engine.py
-├── validation/       # models.py (SilverRecord)
-└── visualization/    # render.py, reports.py
+├── document.py          # Document — единственный public класс
+├── core/                # metadata, validation, exceptions
+├── normalization/       # pipeline, stages, text, deduplication
+├── exporters/           # registry + 8 exporters
+├── dq/                  # quality checks
+├── review/              # модели отчётов и карантина
+├── io/                  # readers, writers
+├── validation/          # Pydantic SilverRecord
+├── translation/         # deep-translator engine
+├── forms/               # W-2, W-4, 1099
+├── visualization/       # preview rendering
+└── cli/                 # Typer app
 ```
 
-## Output Formats
+## Tests
 
-| Flag | Description |
-|------|-------------|
-| `csv` | UTF-8 CSV |
-| `safe_csv` | Fixed-width human-readable CSV |
-| `xlsx` | Excel workbook with auto-sized columns |
-| `txt` | Fixed-width table |
-| `pdf` | A4 PDF with DejaVu Sans / Arial Unicode |
-| `json` | Pretty-printed JSON array |
-| `jsonl` | JSON Lines (one object per line) |
-| `zip` | Archive of all exported files |
+```bash
+python -m pytest tests/ -v        # All
+python -m pytest tests/ -q        # Quick
+python -m pytest tests/test_normalization.py -v
+python -m pytest tests/test_deduplication.py -v
+python -m pytest tests/test_validation.py -v
+python -m pytest tests/test_dataframe.py -v
+python -m pytest tests/test_dq.py -v
+```
 
 ## License
 
