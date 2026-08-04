@@ -84,6 +84,7 @@ print(doc.report())
 idoc process input.csv                  # clean + dedup + dq + export
 idoc process input.csv --no-deduplicate
 idoc process input.csv --no-dq          # без проверок качества
+idoc process input.pdf --forms          # распознать формы W-2/W-4/1099
 idoc process input.csv --translate en -e csv
 idoc convert input.pdf --to csv         # без очистки
 idoc review                             # последний отчёт о качестве

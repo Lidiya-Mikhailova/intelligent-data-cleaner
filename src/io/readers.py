@@ -230,12 +230,12 @@ def read_zip_chunks(
 ) -> Generator[pd.DataFrame, None, None]:
     """
     Extract supported files from a ZIP archive and yield DataFrames.
-    Supported inner formats: .csv, .txt, .json, .jsonl, .jsonlines.
+    Supported inner formats: .csv, .txt, .json, .jsonl, .jsonlines, .xlsx.
     """
     import tempfile
     import zipfile
 
-    SUPPORTED = {".csv", ".txt", ".json", ".jsonl", ".jsonlines"}
+    SUPPORTED = {".csv", ".txt", ".json", ".jsonl", ".jsonlines", ".xlsx"}
 
     with zipfile.ZipFile(path, "r") as zf:
         for entry in zf.namelist():
@@ -251,6 +251,8 @@ def read_zip_chunks(
                     yield from load_csv_chunks(extracted, chunksize)
                 elif ext == ".txt":
                     yield from read_txt_chunks(extracted, chunksize)
+                elif ext == ".xlsx":
+                    yield from read_excel_chunks(extracted, chunksize)
                 elif ext in {".json", ".jsonl", ".jsonlines"}:
                     yield from read_json_chunks(extracted, chunksize)
 

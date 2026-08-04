@@ -40,6 +40,7 @@ if TYPER_AVAILABLE:
         normalize: bool = typer.Option(True, "--normalize/--no-normalize"),
         clean: bool = typer.Option(True, "--clean/--no-clean"),
         deduplicate: bool = typer.Option(True, "--deduplicate/--no-deduplicate"),
+        forms: bool = typer.Option(False, "--forms", help="Detect and extract tax forms (W-2, W-4, 1099)"),
         dq: bool = typer.Option(True, "--dq/--no-dq", help="Run data-quality checks (flags bad rows)"),
         translate: Optional[str] = typer.Option(None, "--translate", "-t", help="Target language (e.g. en, ru)"),
         export: Optional[str] = typer.Option(None, "--export", "-e", help="Output format (csv, json, xlsx, txt, pdf)"),
@@ -53,6 +54,9 @@ if TYPER_AVAILABLE:
         doc = Document.from_file(_resolve_path(input_file))
 
         stages = []
+        if forms:
+            stages.append("form_detect")
+            stages.append("extract")
         if normalize:
             stages.append("normalize")
         if clean:

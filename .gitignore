@@ -147,8 +147,8 @@ data/
 logs/
 !logs/.gitkeep
 
-# Fonts (downloaded at install time)
-fonts/
+# Fonts (root-level downloads; bundled font lives in src/fonts and is tracked)
+/fonts/
 
 # VS Code
 .cursorignore

@@ -12,6 +12,8 @@ from fpdf import FPDF
 
 logger = logging.getLogger(__name__)
 
+_BUNDLED_FONT = Path(__file__).resolve().parent.parent / "fonts" / "DejaVuSans.ttf"
+
 _PDF_EMOJI_MAP = {
     "\U0001f4a9": "[poo]",
     "\U0001f525": "[fire]",
@@ -163,16 +165,20 @@ def _build_pdf(df: pd.DataFrame, font_path: Path | None = None) -> FPDF:
     if font_path:
         arial_unicode = font_path.parent.parent / "Arial Unicode.ttf"
         if arial_unicode.exists():
-            pdf.add_font("ArialUnicode", "", str(arial_unicode), uni=True)
+            pdf.add_font("ArialUnicode", "", str(arial_unicode))
             pdf.set_font("ArialUnicode", size=6)
             logger.info("PDF font: Arial Unicode MS (%s)", arial_unicode)
         elif font_path.exists():
-            pdf.add_font("DejaVu", "", str(font_path), uni=True)
+            pdf.add_font("DejaVu", "", str(font_path))
             pdf.set_font("DejaVu", size=6)
             logger.info("PDF font: DejaVu (%s)", font_path)
         else:
             pdf.set_font("Arial", size=6)
             logger.warning("PDF font fallback: Arial. Unicode may fail")
+    elif _BUNDLED_FONT.exists():
+        pdf.add_font("DejaVu", "", str(_BUNDLED_FONT))
+        pdf.set_font("DejaVu", size=6)
+        logger.info("PDF font: bundled DejaVu Sans (%s)", _BUNDLED_FONT)
     else:
         pdf.set_font("Arial", size=6)
         logger.warning("PDF font fallback: Arial (not found). Unicode may fail")
@@ -202,7 +208,7 @@ def save_pdf(df: pd.DataFrame, path: Path, font_path: Path | None = None) -> Non
 def pdf_to_bytes(df: pd.DataFrame, font_path: Path | None = None) -> bytes:
     """Render DataFrame as PDF and return as bytes."""
     pdf = _build_pdf(df, font_path=font_path)
-    raw = pdf.output(dest="S")
+    raw = pdf.output()
     if isinstance(raw, bytearray):
         return bytes(raw)
     if isinstance(raw, bytes):
