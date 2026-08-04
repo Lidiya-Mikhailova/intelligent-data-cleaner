@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
-from src.normalization.base import ProcessingStage
+from src.normalization.base import ProcessingStage, is_text_dtype
 
 if TYPE_CHECKING:
     from src.document import Document
@@ -71,7 +71,7 @@ def _fail_result(
 
 
 def _text_cols(df: pd.DataFrame) -> List[str]:
-    return [c for c in df.columns if df[c].dtype == object]
+    return [c for c in df.columns if is_text_dtype(df[c].dtype)]
 
 
 def _score_from_results(results: List[Dict[str, Any]]) -> float:

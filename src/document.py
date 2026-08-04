@@ -161,11 +161,12 @@ class Document:
             except (ImportError, AttributeError):
                 RAPIDFUZZ_AVAILABLE = False
             if RAPIDFUZZ_AVAILABLE:
+                from src.normalization.base import is_text_dtype
                 from src.normalization.deduplication import fuzzy_deduplicate
 
                 all_dupes = pd.Series(False, index=df.index)
                 for col in cols:
-                    if col in df.columns and df[col].dtype == object:
+                    if col in df.columns and is_text_dtype(df[col].dtype):
                         values = df[col].astype(str).tolist()
                         mapping = fuzzy_deduplicate(values, threshold)
                         dupe_vals = {orig for orig, canon in mapping if orig != canon}

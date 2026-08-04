@@ -5,6 +5,8 @@ from typing import List, Optional, Set
 
 import pandas as pd
 
+from src.normalization.base import is_text_dtype
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -95,7 +97,7 @@ class PolarsTransformer:
 
     def _detect_and_mark_nulls(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
-            if df[col].dtype == object:
+            if is_text_dtype(df[col].dtype):
                 cleaned = df[col].astype(str).str.strip().str.lower()
                 mask = cleaned.isin(NULL_PATTERNS)
                 self._null_count += int(mask.sum())
@@ -113,7 +115,7 @@ class PolarsTransformer:
 
     def _coerce_types_polars(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
-            if df[col].dtype != object or df[col].dropna().empty:
+            if not is_text_dtype(df[col].dtype) or df[col].dropna().empty:
                 continue
             series = df[col].dropna()
             sample = series.head(100)
@@ -159,7 +161,7 @@ class PolarsTransformer:
 
     def _coerce_types_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
-            if df[col].dtype != object or df[col].dropna().empty:
+            if not is_text_dtype(df[col].dtype) or df[col].dropna().empty:
                 continue
             series = df[col].dropna()
             if series.empty:
@@ -204,7 +206,7 @@ class PolarsTransformer:
             "%B %d %Y",
         ]
         for col in df.columns:
-            if df[col].dtype != object or df[col].dropna().empty:
+            if not is_text_dtype(df[col].dtype) or df[col].dropna().empty:
                 continue
             try:
                 pldf = pl.from_pandas(df[[col]].fillna(None))
@@ -242,7 +244,7 @@ class PolarsTransformer:
             "%Y%m%d",
         ]
         for col in df.columns:
-            if df[col].dtype != object or df[col].dropna().empty:
+            if not is_text_dtype(df[col].dtype) or df[col].dropna().empty:
                 continue
             if df[col].str.len().max() < 25:
                 best_fmt: Optional[str] = None
@@ -265,7 +267,7 @@ class PolarsTransformer:
 
     def _normalise_numbers(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
-            if df[col].dtype != object:
+            if not is_text_dtype(df[col].dtype):
                 continue
             series = df[col].astype(str)
             non_null = series[series.notna() & (series != "")]
@@ -294,7 +296,7 @@ class PolarsTransformer:
 
     def _clean_text_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
-            if df[col].dtype == object:
+            if is_text_dtype(df[col].dtype):
                 df[col] = df[col].apply(lambda x: self._clean_text(x) if isinstance(x, str) else x)
         return df
 
@@ -308,7 +310,7 @@ class PolarsTransformer:
 
     def _handle_mixed_types(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
-            if df[col].dtype == object and not df[col].dropna().empty:
+            if is_text_dtype(df[col].dtype) and not df[col].dropna().empty:
                 non_null = df[col].dropna()
                 type_counts = non_null.apply(type).value_counts()
                 num_types = len(type_counts)

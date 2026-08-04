@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import pandas as pd
 
-from src.normalization.base import ProcessingStage
+from src.normalization.base import ProcessingStage, is_text_dtype
 
 if TYPE_CHECKING:
     from src.document import Document
@@ -225,7 +225,7 @@ class NormalizeStage(ProcessingStage):
             transformer = PolarsTransformer(df)
             df = transformer.transform()
             for col in df.columns:
-                if df[col].dtype == object:
+                if is_text_dtype(df[col].dtype):
                     df[col] = df[col].astype(str).apply(normalize_text)
             return df
 
@@ -277,7 +277,7 @@ class DeduplicateStage(ProcessingStage):
 
                 mask = pd.Series(True, index=df.index)
                 for col in cols:
-                    if col in df.columns and df[col].dtype == object:
+                    if col in df.columns and is_text_dtype(df[col].dtype):
                         values = df[col].astype(str).tolist()
                         mapping = fuzzy_deduplicate(values, self.threshold)
                         keep = {orig for orig, canon in mapping if orig == canon}
