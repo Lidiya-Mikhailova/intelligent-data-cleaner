@@ -6,6 +6,8 @@ from typing import List, Optional
 
 import pandas as pd
 
+from src.normalization.base import is_text_dtype
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -77,7 +79,7 @@ def translate_dataframe(
     source: Optional[str] = None,
     columns: Optional[List[str]] = None,
 ) -> pd.DataFrame:
-    cols_to_translate = columns or df.select_dtypes(include=["object"]).columns.tolist()
+    cols_to_translate = columns or [c for c in df.columns if is_text_dtype(df[c].dtype)]
     engine = get_translation_engine("google")
     df = df.copy()
 
