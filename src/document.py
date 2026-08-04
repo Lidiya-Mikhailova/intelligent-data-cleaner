@@ -231,7 +231,7 @@ class Document:
     def clean(self) -> Document:
         return self.run_pipeline(["clean"])
 
-    def deduplicate(self, threshold: float = 85.0, fuzzy: bool = True, subset: Optional[List[str]] = None) -> Document:
+    def deduplicate(self, threshold: float = 85.0, fuzzy: bool = False, subset: Optional[List[str]] = None) -> Document:
         from src.normalization.pipeline import Pipeline
         from src.normalization.stages import DeduplicateStage
 

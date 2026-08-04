@@ -27,7 +27,7 @@ doc = Document.from_text("Name: John\nAge: 30")
 ```python
 doc = doc.normalize()           # encoding, whitespace, unicode
 doc = doc.clean()               # structural cleanup
-doc = doc.deduplicate()         # fuzzy dedup (default, rapidfuzz)
+doc = doc.deduplicate()         # exact dedup (default)
 doc = doc.deduplicate(fuzzy=True, threshold=85.0, subset=["Name", "Age"])
 doc = doc.translate(target="en")
 doc = doc.validate()            # DQ checks
@@ -70,10 +70,6 @@ doc.export("jsonl", output_path="clean.jsonl")
 doc.export("parquet", output_path="clean.parquet", compression="snappy")
 data = doc.export("csv")                           # → bytes
 ```
-
-> Примечание: `doc.export("csv", output_path=...)` сохраняет CSV в выровненном
-> табличном виде (удобно для чтения человеком, но не стандартный CSV). Для
-> стандартного CSV используйте возврат байтов `data = doc.export("csv")`.
 
 ### Preview
 

@@ -80,6 +80,11 @@ class ReportSummary:
     stages: List[Dict[str, Any]] = field(default_factory=list)
     quarantine_records: List[QuarantineRecord] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        self.quarantine_records = [
+            qr if isinstance(qr, QuarantineRecord) else QuarantineRecord(**qr) for qr in self.quarantine_records
+        ]
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "source_file": self.source_file,
@@ -171,6 +176,85 @@ def _count_suspicious_rows(quarantine_df: pd.DataFrame, invalid_df: pd.DataFrame
 
 
 # ── Build Report ─────────────────────────────────────────────────────────────
+
+
+def build_document_report(doc) -> ReportSummary:
+    """Classify a :class:`Document` and build a full :class:`ReportSummary`.
+
+    Reuses ``build_report_summary`` so the review JSON and quarantine CSV
+    share the same classification logic as the core pipeline.
+    """
+    from src.core.validation import classify_records
+
+    valid, invalid, quarantine = classify_records(doc.data)
+    duplicates_removed = len(doc.removed.get("deduplicate", pd.DataFrame()))
+    stages = [
+        {
+            "name": s.name,
+            "params": s.params,
+            "rows_before": s.rows_before,
+            "rows_after": s.rows_after,
+            "status": s.status,
+        }
+        for s in doc.metadata.processing_history
+    ]
+    dq_metrics = DataQualityMetrics(
+        rows_total=len(doc.data),
+        rows_valid=len(valid),
+        rows_invalid=len(invalid),
+        rows_quarantine=len(quarantine),
+        duplicates_removed=duplicates_removed,
+    )
+    return build_report_summary(
+        source_file=doc.metadata.source or "memory",
+        raw_df=doc.data,
+        processed_df=doc.data,
+        valid_df=valid,
+        invalid_df=invalid,
+        quarantine_df=quarantine,
+        dq_metrics=dq_metrics,
+        stages=stages,
+    )
+
+
+def write_report_files(doc, output_dir: str | Path = "output") -> tuple[Path, Path]:
+    """Persist ``review_*.json`` and ``quarantine_*.csv`` for a processing run.
+
+    Returns the paths to the written files.
+    """
+    from datetime import datetime
+
+    report = build_document_report(doc)
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    review_path = output_dir / f"review_{stamp}.json"
+    quarantine_path = output_dir / f"quarantine_{stamp}.csv"
+
+    payload = report.to_dict()
+    payload["quarantine_records"] = [
+        {
+            "row_index": qr.row_index,
+            "data": qr.data,
+            "reason": qr.reason,
+            "category": qr.category,
+            "confidence": qr.confidence,
+            "suggested_normalization": qr.suggested_normalization,
+        }
+        for qr in report.quarantine_records
+    ]
+    review_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if report.quarantine_records:
+        rows = [
+            {**qr.data, "_reason": qr.reason, "_category": qr.category, "_confidence": qr.confidence}
+            for qr in report.quarantine_records
+        ]
+        pd.DataFrame(rows).to_csv(quarantine_path, index=False, encoding="utf-8")
+
+    logger.info("Wrote review report %s and quarantine %s", review_path.name, quarantine_path.name)
+    return review_path, quarantine_path
 
 
 def build_report_summary(
@@ -302,5 +386,7 @@ __all__ = [
     "QuarantineRecord",
     "ReportSummary",
     "build_report_summary",
+    "build_document_report",
     "format_report_txt",
+    "write_report_files",
 ]

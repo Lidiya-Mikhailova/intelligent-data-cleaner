@@ -66,20 +66,9 @@ def _align(v: object, width: int, col_name: str) -> str:
 
 
 def save_csv(df: pd.DataFrame, path: Path) -> None:
-    """Save DataFrame to aligned CSV with visible column separation."""
-    widths = _col_widths(df)
-    sep = " │ "
-
-    with open(path, "w", encoding="utf-8") as f:
-        header = sep.join(_align(c, w, c) for c, w in zip(df.columns, widths))
-        f.write(header + "\n")
-        f.write("─" * _display_width(header) + "\n")
-
-        for _, row in df.iterrows():
-            line = sep.join(_align(row[c], w, c) for c, w in zip(df.columns, widths))
-            f.write(line + "\n")
-
-    logger.info("Saved aligned CSV: %s", path.name)
+    """Save DataFrame to a standard UTF-8 CSV file."""
+    df.to_csv(path, index=False, encoding="utf-8")
+    logger.info("Saved CSV: %s", path.name)
 
 
 def save_csv_safe(df: pd.DataFrame, path: Path) -> None:

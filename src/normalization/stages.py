@@ -46,6 +46,7 @@ class IngestStage(ProcessingStage):
         from src.document import Document as Doc
         from src.io.readers import (
             load_csv_chunks,
+            read_excel_chunks,
             read_json_chunks,
             read_pdf_chunks,
             read_txt_chunks,
@@ -60,6 +61,7 @@ class IngestStage(ProcessingStage):
             ".json": read_json_chunks,
             ".jsonl": read_json_chunks,
             ".jsonlines": read_json_chunks,
+            ".xlsx": read_excel_chunks,
             ".pdf": read_pdf_chunks,
             ".zip": read_zip_chunks,
         }

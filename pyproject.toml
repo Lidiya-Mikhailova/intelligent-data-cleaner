@@ -66,9 +66,9 @@ all = [
 idoc = "src.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/anomalyco/intelligent-data-cleaner"
-Repository = "https://github.com/anomalyco/intelligent-data-cleaner"
-Issues = "https://github.com/anomalyco/intelligent-data-cleaner/issues"
+Homepage = "https://github.com/Lidiya-Mikhailova/intelligent-data-cleaner"
+Repository = "https://github.com/Lidiya-Mikhailova/intelligent-data-cleaner"
+Issues = "https://github.com/Lidiya-Mikhailova/intelligent-data-cleaner/issues"
 
 [tool.setuptools.packages.find]
 include = ["src*"]

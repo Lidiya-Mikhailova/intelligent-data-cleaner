@@ -47,6 +47,8 @@ if TYPER_AVAILABLE:
     ):
         """Load, clean, optionally translate, and export a file."""
         Document.setup_logging()
+        from src.review import write_report_files
+
         doc = Document.from_file(_resolve_path(input_file))
 
         stages = []
@@ -62,6 +64,12 @@ if TYPER_AVAILABLE:
 
         if translate:
             doc = doc.translate(target=translate)
+
+        try:
+            review_path, _ = write_report_files(doc)
+            console.print(f"[dim]Review report: {review_path}[/]")
+        except Exception as e:  # pragma: no cover - best-effort reporting
+            logger.warning("Failed to write review artifacts: %s", e)
 
         if export:
             result = doc.export(export, output_path=_resolve_path(output) if output else None)

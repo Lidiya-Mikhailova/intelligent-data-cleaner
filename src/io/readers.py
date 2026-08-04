@@ -255,6 +255,15 @@ def read_zip_chunks(
                     yield from read_json_chunks(extracted, chunksize)
 
 
+def read_excel_chunks(path: Path, chunksize: int = 50_000) -> Generator[pd.DataFrame, None, None]:
+    """
+    Read the first worksheet of an Excel (.xlsx) file into a DataFrame.
+    Requires ``openpyxl`` (installed via the ``all`` extra).
+    """
+    df = pd.read_excel(path, sheet_name=0, dtype=str, engine="openpyxl")
+    yield df.fillna("")
+
+
 def read_json_chunks(path: Path, chunksize: int = 50_000) -> Generator[pd.DataFrame, None, None]:
     """
     Read JSON (.json) or JSON Lines (.jsonl).
