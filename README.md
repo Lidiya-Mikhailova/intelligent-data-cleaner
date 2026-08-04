@@ -1,6 +1,6 @@
 # Intelligent Data Cleaner
 
-**загрузил → почистил → поправил → выбрал формат → выгрузил**
+**load → clean → fix → pick a format → export**
 
 ```bash
 pip install -e ".[dev,all]"
@@ -36,24 +36,24 @@ doc = doc.validate()            # DQ checks
 ### 3. Inspect & Fix
 
 ```python
-# Посмотреть дубликаты (не удаляет!)
+# Inspect duplicates (does not remove!)
 dupes = doc.find_duplicates(fuzzy=False, subset=["Name", "Age"])
 print(dupes)
 
-# Удалить конкретные строки
+# Remove specific rows
 doc = doc.remove_rows([3, 7])
 doc = doc.keep_rows(lambda r: r["Name"] != "")
 
-# Посмотреть что удалил deduplicate
+# See what deduplicate removed
 print(doc.duplicates)
-print(doc.removed)  # строки, удалённые на этапе deduplicate
+print(doc.removed)  # rows removed during deduplication
 
-# Классификация (VALID / INVALID / QUARANTINE)
+# Classification (VALID / INVALID / QUARANTINE)
 valid, invalid, quarantine = doc.classify()
 r = doc.review
 print(f"valid={r.rows_valid}, invalid={r.rows_invalid}, quarantine={r.rows_quarantine}")
 
-# Подозрительные строки (DQ warnings)
+# Suspicious rows (DQ warnings)
 print(doc.suspicious())
 print(doc.quarantine)
 ```
@@ -83,18 +83,18 @@ print(doc.report())
 ```bash
 idoc process input.csv                  # clean + dedup + dq + export
 idoc process input.csv --no-deduplicate
-idoc process input.csv --no-dq          # без проверок качества
-idoc process input.pdf --forms          # распознать формы W-2/W-4/1099
+idoc process input.csv --no-dq          # skip DQ checks
+idoc process input.pdf --forms          # extract W-2/W-4/1099 forms
 idoc process input.csv --translate en -e csv
-idoc convert input.pdf --to csv         # без очистки
-idoc review                             # последний отчёт о качестве
-idoc quarantine list                    # проблемные строки
-idoc quarantine export -s q.csv         # выгрузить карантин
+idoc convert input.pdf --to csv         # no cleaning
+idoc review                             # latest quality report
+idoc quarantine list                    # problematic rows
+idoc quarantine export -s q.csv         # export quarantine
 idoc info input.csv
 idoc formats
 ```
 
-## Полный пример
+## Full example
 
 ```python
 from src.document import Document
@@ -102,19 +102,19 @@ from src.document import Document
 doc = Document.from_file("bronze/dirty.csv")
 doc = doc.normalize().clean()
 
-# смотрим дубликаты
+# inspect duplicates
 print(doc.find_duplicates(fuzzy=False))
 
-# удаляем мусорную строку 7
+# drop junk row 7
 doc = doc.remove_rows(7)
 
-# дедуплицируем остальное
+# deduplicate the rest
 doc = doc.deduplicate()
 
-# смотрим что удалилось
+# see what was removed
 print(doc.duplicates)
 
-# экспорт
+# export
 doc.export("csv", output_path="output/clean.csv")
 ```
 
@@ -122,12 +122,12 @@ doc.export("csv", output_path="output/clean.csv")
 
 ```
 src/
-├── document.py          # Document — единственный public класс
+├── document.py          # the only public class
 ├── core/                # metadata, validation, exceptions
 ├── normalization/       # pipeline, stages, text, deduplication
 ├── exporters/           # registry + 8 exporters
 ├── dq/                  # quality checks
-├── review/              # модели отчётов и карантина
+├── review/              # report & quarantine models
 ├── io/                  # readers, writers
 ├── validation/          # Pydantic SilverRecord
 ├── translation/         # deep-translator engine

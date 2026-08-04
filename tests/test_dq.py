@@ -21,7 +21,7 @@ def _non_pass(checks_json: str) -> list:
     return [c for c in json.loads(checks_json) if c["status"] != "pass"]
 
 
-# ── check_schema ──────────────────────────────────────────────────────────────
+# check_schema
 
 
 def test_schema_pass():
@@ -43,7 +43,7 @@ def test_schema_no_required():
     assert all(len(r) == 1 and r[0]["status"] == "pass" for r in result)
 
 
-# ── check_types ───────────────────────────────────────────────────────────────
+# check_types
 
 
 def test_types_pass():
@@ -64,7 +64,7 @@ def test_types_date_pass():
     assert result.iloc[0][0]["status"] == "pass"
 
 
-# ── check_nulls ───────────────────────────────────────────────────────────────
+# check_nulls
 
 
 def test_nulls_pass():
@@ -85,7 +85,7 @@ def test_nulls_suspicious_empty():
     assert any(r["check_name"] == "suspicious_empty" and r["status"] == "warn" for r in result.iloc[0])
 
 
-# ── check_ocr_quality ─────────────────────────────────────────────────────────
+# check_ocr_quality
 
 
 def test_ocr_quality_pass():
@@ -108,7 +108,7 @@ def test_ocr_high_noise():
     assert any("noise" in w["check_name"] for w in warns)
 
 
-# ── check_dedup_quality ───────────────────────────────────────────────────────
+# check_dedup_quality
 
 
 def test_dedup_quality_pass():
@@ -124,7 +124,7 @@ def test_dedup_quality_finds_duplicate():
     assert any("collision" in f["check_name"] for f in fails)
 
 
-# ── check_translation_quality ─────────────────────────────────────────────────
+# check_translation_quality
 
 
 def test_translation_pass():
@@ -140,7 +140,7 @@ def test_translation_broken_unicode():
     assert any("broken_unicode" in f["check_name"] for f in fails)
 
 
-# ── check_normalization_quality ───────────────────────────────────────────────
+# check_normalization_quality
 
 
 def test_normalization_pass():
@@ -156,7 +156,7 @@ def test_normalization_control_chars():
     assert any("control_chars" in w["check_name"] for w in warns)
 
 
-# ── _score_from_results / _status_from_score ──────────────────────────────────
+# _score_from_results / _status_from_score
 
 
 def test_score_pass():
@@ -180,7 +180,7 @@ def test_status_from_score():
     assert _status_from_score(0.6) == "fail"
 
 
-# ── DQService ─────────────────────────────────────────────────────────────────
+# DQService
 
 
 def test_dq_service_adds_columns():
@@ -215,7 +215,7 @@ def test_dq_service_flags_issues(tmp_path):
     assert result.iloc[1]["_dq_status"] == "fail"
 
 
-# ── quality_report ────────────────────────────────────────────────────────────
+# quality_report
 
 
 def test_quality_report_empty():
@@ -246,7 +246,7 @@ def test_quality_report_with_dq_only():
     assert report["pass_rate"] == 1.0
 
 
-# ── Integration: classify_records with DQ ─────────────────────────────────────
+# Integration: classify_records with DQ
 
 
 def test_classify_with_dq_pass():
@@ -303,7 +303,7 @@ def test_classify_with_dq_warn():
     assert len(quarantine) >= 1
 
 
-# ── Integration: Document API ─────────────────────────────────────────────────
+# Integration: Document API
 
 
 def test_document_validate():
@@ -326,7 +326,7 @@ def test_document_quality_report():
         assert report["total"] >= 1
 
 
-# ── DQStage ───────────────────────────────────────────────────────────────────
+# DQStage
 
 
 def test_dq_stage():

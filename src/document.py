@@ -49,7 +49,7 @@ class Document:
         self._review_summary: Any = None
         self._quarantine_df: pd.DataFrame = pd.DataFrame()
 
-    # ── Review / Quarantine API ────────────────────────────────────
+    # Review / Quarantine API
 
     @property
     def review(self):
@@ -79,7 +79,7 @@ class Document:
         self._quarantine_df = quarantine
         return valid, invalid, quarantine
 
-    # ── Factory Methods ────────────────────────────────────────────
+    # Factory Methods
 
     @classmethod
     def from_file(cls, path: Union[str, Path]) -> Document:
@@ -114,7 +114,7 @@ class Document:
             cls(pd.DataFrame())
         )
 
-    # ── Properties ─────────────────────────────────────────────────
+    # Properties
 
     @property
     def data(self) -> pd.DataFrame:
@@ -136,7 +136,7 @@ class Document:
     def is_empty(self) -> bool:
         return self._data.empty
 
-    # ── Inspection API ─────────────────────────────────────────────
+    # Inspection API
 
     @property
     def removed(self) -> Dict[str, pd.DataFrame]:
@@ -199,7 +199,7 @@ class Document:
         new_doc._removed = dict(self._removed)
         return new_doc
 
-    # ── Pipeline Integration ───────────────────────────────────────
+    # Pipeline Integration
 
     def transform(
         self,
@@ -223,7 +223,7 @@ class Document:
         )
         return self
 
-    # ── Convenience Methods ────────────────────────────────────────
+    # Convenience Methods
 
     def normalize(self) -> Document:
         return self.run_pipeline(["normalize"])
@@ -272,7 +272,7 @@ class Document:
     def quality_metrics(self) -> dict:
         return dict(self._metadata.quality_metrics)
 
-    # ── Pipeline Runner ────────────────────────────────────────────
+    # Pipeline Runner
 
     def run_pipeline(self, stages: Optional[List[str]] = None) -> Document:
         from src.dq import DQStage
@@ -313,7 +313,7 @@ class Document:
 
         return pipeline.run(self)
 
-    # ── Infrastructure API ─────────────────────────────────────────
+    # Infrastructure API
 
     @staticmethod
     def setup_logging(base_dir: Union[str, Path] = ".") -> None:
@@ -327,7 +327,7 @@ class Document:
 
         return _list()
 
-    # ── Terminal Operations ────────────────────────────────────────
+    # Terminal Operations
 
     def export(
         self,

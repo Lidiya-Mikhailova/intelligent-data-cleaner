@@ -13,7 +13,7 @@ from src.dq import DQ_COLUMNS
 logger = logging.getLogger(__name__)
 
 
-# ── Data Models ───────────────────────────────────────────────────────────────
+# Data Models
 
 
 @dataclass
@@ -104,7 +104,7 @@ class ReportSummary:
         }
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# Helpers
 
 
 def _parse_dq_checks_raw(raw) -> list[dict]:
@@ -178,7 +178,7 @@ def _count_suspicious_rows(quarantine_df: pd.DataFrame, invalid_df: pd.DataFrame
     return len(quarantine_df) + len(invalid_df)
 
 
-# ── Build Report ─────────────────────────────────────────────────────────────
+# Build Report
 
 
 def build_document_report(doc) -> ReportSummary:
@@ -326,7 +326,7 @@ def build_report_summary(
     )
 
 
-# ── Format Report ────────────────────────────────────────────────────────────
+# Format Report
 
 
 def format_report_txt(summary: ReportSummary) -> str:

@@ -126,13 +126,14 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Agent instructions (local only)
+AGENTS.md
+
 # OS files
 .DS_Store
 Thumbs.db
 
-# ============================
 # Project-specific ignores
-# ============================
 
 # Input / output data (never commit client data)
 bronze/

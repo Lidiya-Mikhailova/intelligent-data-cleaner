@@ -55,7 +55,7 @@ class PolarsTransformer:
         self._null_rate: float = 0.0
         self._schema_drift_detected: bool = False
 
-    # ── Public metrics ──────────────────────────────────────────────
+    # Public metrics
 
     @property
     def type_conversion_failures(self) -> int:
@@ -69,7 +69,7 @@ class PolarsTransformer:
     def schema_drift_detected(self) -> bool:
         return self._schema_drift_detected
 
-    # ── Full pipeline ───────────────────────────────────────────────
+    # Full pipeline
 
     def transform(self) -> pd.DataFrame:
         """Apply the full intelligent transformation pipeline.
@@ -93,7 +93,7 @@ class PolarsTransformer:
         df = self._handle_mixed_types(df)
         return df
 
-    # ── Step 1: Null detection ──────────────────────────────────────
+    # Step 1: Null detection
 
     def _detect_and_mark_nulls(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
@@ -106,7 +106,7 @@ class PolarsTransformer:
         self._null_rate = self._null_count / total_cells
         return df
 
-    # ── Step 2: Schema inference & type coercion ────────────────────
+    # Step 2: Schema inference & type coercion
 
     def _coerce_types(self, df: pd.DataFrame) -> pd.DataFrame:
         if POLARS_AVAILABLE and pl is not None:
@@ -183,7 +183,7 @@ class PolarsTransformer:
                 df[col] = new_col
         return df
 
-    # ── Step 3: Date parsing ────────────────────────────────────────
+    # Step 3: Date parsing
 
     def _parse_dates(self, df: pd.DataFrame) -> pd.DataFrame:
         if POLARS_AVAILABLE and pl is not None:
@@ -263,7 +263,7 @@ class PolarsTransformer:
                     continue
         return df
 
-    # ── Step 4: Number normalisation ────────────────────────────────
+    # Step 4: Number normalisation
 
     def _normalise_numbers(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
@@ -292,7 +292,7 @@ class PolarsTransformer:
                     continue
         return df
 
-    # ── Step 5: Text cleaning (Unicode, multilingual) ──────────────
+    # Step 5: Text cleaning (Unicode, multilingual)
 
     def _clean_text_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
@@ -306,7 +306,7 @@ class PolarsTransformer:
 
         return normalize_text(text)
 
-    # ── Step 6: Mixed-type column handling ──────────────────────────
+    # Step 6: Mixed-type column handling
 
     def _handle_mixed_types(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:

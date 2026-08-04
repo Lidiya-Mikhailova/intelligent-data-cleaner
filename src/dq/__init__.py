@@ -33,7 +33,7 @@ def _str_col(col: pd.Series) -> pd.Series:
     return s
 
 
-# ── Models ──────────────────────────────────────────────────────────────────────
+# Models
 
 
 @dataclass
@@ -49,7 +49,7 @@ class DQCheckResult:
 DQ_COLUMNS = ["_dq_score", "_dq_status", "_dq_checks"]
 
 
-# ── Check helpers ───────────────────────────────────────────────────────────────
+# Check helpers
 
 
 def _result(
@@ -130,7 +130,7 @@ def _row_checks_json(row_results: List[Dict[str, Any]]) -> str:
     return "[" + ",".join(parts) + "]"
 
 
-# ── Checks ──────────────────────────────────────────────────────────────────────
+# Checks
 
 
 def _empty_mask(col: pd.Series) -> pd.Series:
@@ -395,7 +395,7 @@ def check_normalization_quality(df: pd.DataFrame, text_fields: Optional[List[str
     return pd.Series(per_row, index=df.index)
 
 
-# ── DQ Service ──────────────────────────────────────────────────────────────────
+# DQ Service
 
 
 DEFAULT_CHECKS: List[Callable] = [
@@ -483,7 +483,7 @@ def strip_dq_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ── DQStage ─────────────────────────────────────────────────────────────────────
+# DQStage
 
 
 class DQStage(ProcessingStage):
