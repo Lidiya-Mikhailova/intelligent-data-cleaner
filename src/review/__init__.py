@@ -182,11 +182,13 @@ def build_document_report(doc) -> ReportSummary:
     """Classify a :class:`Document` and build a full :class:`ReportSummary`.
 
     Reuses ``build_report_summary`` so the review JSON and quarantine CSV
-    share the same classification logic as the core pipeline.
+    share the same classification logic as the core pipeline.  Uses
+    ``strict=False`` so routing is driven by DQ checks instead of the
+    hard-coded ``SilverRecord`` schema (which would flag arbitrary CSVs).
     """
     from src.core.validation import classify_records
 
-    valid, invalid, quarantine = classify_records(doc.data)
+    valid, invalid, quarantine = classify_records(doc.data, strict=False)
     duplicates_removed = len(doc.removed.get("deduplicate", pd.DataFrame()))
     stages = [
         {
@@ -217,10 +219,10 @@ def build_document_report(doc) -> ReportSummary:
     )
 
 
-def write_report_files(doc, output_dir: str | Path = "output") -> tuple[Path, Path]:
+def write_report_files(doc, output_dir: str | Path = "output") -> tuple[Path, Path, ReportSummary]:
     """Persist ``review_*.json`` and ``quarantine_*.csv`` for a processing run.
 
-    Returns the paths to the written files.
+    Returns ``(review_path, quarantine_path, report)``.
     """
     from datetime import datetime
 
@@ -254,7 +256,7 @@ def write_report_files(doc, output_dir: str | Path = "output") -> tuple[Path, Pa
         pd.DataFrame(rows).to_csv(quarantine_path, index=False, encoding="utf-8")
 
     logger.info("Wrote review report %s and quarantine %s", review_path.name, quarantine_path.name)
-    return review_path, quarantine_path
+    return review_path, quarantine_path, report
 
 
 def build_report_summary(

@@ -81,10 +81,14 @@ print(doc.report())
 ## CLI
 
 ```bash
-idoc process input.csv                  # clean + dedup + export
+idoc process input.csv                  # clean + dedup + dq + export
 idoc process input.csv --no-deduplicate
+idoc process input.csv --no-dq          # без проверок качества
 idoc process input.csv --translate en -e csv
 idoc convert input.pdf --to csv         # без очистки
+idoc review                             # последний отчёт о качестве
+idoc quarantine list                    # проблемные строки
+idoc quarantine export -s q.csv         # выгрузить карантин
 idoc info input.csv
 idoc formats
 ```

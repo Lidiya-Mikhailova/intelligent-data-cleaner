@@ -40,6 +40,7 @@ if TYPER_AVAILABLE:
         normalize: bool = typer.Option(True, "--normalize/--no-normalize"),
         clean: bool = typer.Option(True, "--clean/--no-clean"),
         deduplicate: bool = typer.Option(True, "--deduplicate/--no-deduplicate"),
+        dq: bool = typer.Option(True, "--dq/--no-dq", help="Run data-quality checks (flags bad rows)"),
         translate: Optional[str] = typer.Option(None, "--translate", "-t", help="Target language (e.g. en, ru)"),
         export: Optional[str] = typer.Option(None, "--export", "-e", help="Output format (csv, json, xlsx, txt, pdf)"),
         output: Optional[str] = typer.Option(None, "--output", "-o", help="Output path"),
@@ -58,6 +59,8 @@ if TYPER_AVAILABLE:
             stages.append("clean")
         if deduplicate:
             stages.append("deduplicate")
+        if dq:
+            stages.append("dq")
 
         if stages:
             doc = doc.run_pipeline(stages)
@@ -66,8 +69,13 @@ if TYPER_AVAILABLE:
             doc = doc.translate(target=translate)
 
         try:
-            review_path, _ = write_report_files(doc)
+            review_path, _, report = write_report_files(doc)
             console.print(f"[dim]Review report: {review_path}[/]")
+            console.print(
+                f"[green]valid={report.rows_valid}[/] "
+                f"[yellow]invalid={report.rows_invalid}[/] "
+                f"[yellow]quarantine={report.rows_quarantine}[/]"
+            )
         except Exception as e:  # pragma: no cover - best-effort reporting
             logger.warning("Failed to write review artifacts: %s", e)
 

@@ -335,13 +335,14 @@ class Document:
         output_path: Optional[Union[str, Path]] = None,
         **kwargs: Any,
     ) -> Union[bytes, Path]:
+        from src.dq import strip_dq_columns
         from src.exporters.registry import get_exporter
 
         fmt = fmt.lower().lstrip(".")
         exporter = get_exporter(fmt)
 
         path = Path(output_path) if output_path else None
-        result = exporter.export(self._data, output_path=path, **kwargs)
+        result = exporter.export(strip_dq_columns(self._data), output_path=path, **kwargs)
         self._last_export_result = result
 
         if result.path:

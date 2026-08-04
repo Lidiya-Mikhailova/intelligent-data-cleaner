@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "intelligent-data-cleaner"
 version = "0.2.0"
-description = "Intelligent Document Processing SDK — extract, clean, normalize, deduplicate, translate and export data from CSV, TXT, JSON, Excel, PDF and scanned documents"
+description = "Intelligent Document Processing SDK — extract, clean, normalize, deduplicate, translate and export data from CSV, TXT, JSON, Excel and PDF"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
     {name = "Intelligent Data Cleaner Contributors"}
 ]
-keywords = ["data-cleaning", "document-processing", "ocr", "normalization", "deduplication", "sdk", "csv", "pdf", "json"]
+keywords = ["data-cleaning", "document-processing", "normalization", "deduplication", "sdk", "csv", "pdf", "json"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
