@@ -18,6 +18,17 @@ except ImportError:
     POLARS_AVAILABLE = False
 
 
+def _polars_strip(expr):
+    """Strip whitespace from a Polars string expression across polars versions.
+
+    ``str.strip`` was renamed to ``str.strip_chars`` in polars 1.x.
+    """
+    try:
+        return expr.str.strip()
+    except AttributeError:
+        return expr.str.strip_chars()
+
+
 NULL_PATTERNS: Set[str] = {
     "",
     "null",
@@ -122,7 +133,7 @@ class PolarsTransformer:
             try:
                 pldf = pl.from_pandas(sample.to_frame(name=col))
                 # Polars schema inference
-                inferred = pldf.with_columns(pl.col(col).cast(pl.String).str.strip())
+                inferred = pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                 # Try integer
                 try:
                     as_int = inferred.with_columns(pl.col(col).cast(pl.Int64, strict=False).alias("_cast"))
@@ -130,7 +141,7 @@ class PolarsTransformer:
                     total = inferred.height
                     if total > 0 and non_null_int / total > 0.6:
                         full_pldf = pl.from_pandas(df[[col]].fillna(None))
-                        full_pldf = full_pldf.with_columns(pl.col(col).cast(pl.String).str.strip())
+                        full_pldf = full_pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                         full_pldf = full_pldf.with_columns(pl.col(col).cast(pl.Int64, strict=False))
                         pandas_col = full_pldf[col].to_pandas()
                         failed = pandas_col.isna().sum() - df[col].isna().sum()
@@ -146,7 +157,7 @@ class PolarsTransformer:
                     total = inferred.height
                     if total > 0 and non_null_float / total > 0.6:
                         full_pldf = pl.from_pandas(df[[col]].fillna(None))
-                        full_pldf = full_pldf.with_columns(pl.col(col).cast(pl.String).str.strip())
+                        full_pldf = full_pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                         full_pldf = full_pldf.with_columns(pl.col(col).cast(pl.Float64, strict=False))
                         pandas_col = full_pldf[col].to_pandas()
                         failed = pandas_col.isna().sum() - df[col].isna().sum()
@@ -210,7 +221,7 @@ class PolarsTransformer:
                 continue
             try:
                 pldf = pl.from_pandas(df[[col]].fillna(None))
-                pldf = pldf.with_columns(pl.col(col).cast(pl.String).str.strip())
+                pldf = pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                 best_fmt: Optional[str] = None
                 best_count = 0
                 for fmt in date_formats:
@@ -224,7 +235,7 @@ class PolarsTransformer:
                         continue
                 if best_fmt and best_count > len(df) * 0.3:
                     full = pl.from_pandas(df[[col]].fillna(None))
-                    full = full.with_columns(pl.col(col).cast(pl.String).str.strip())
+                    full = full.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                     parsed = full.with_columns(pl.col(col).str.to_date(format=best_fmt, strict=False))
                     df[col] = parsed[col].to_pandas()
             except Exception:
@@ -314,7 +325,8 @@ class PolarsTransformer:
                 non_null = df[col].dropna()
                 type_counts = non_null.apply(type).value_counts()
                 num_types = len(type_counts)
-                str_count = int(type_counts.get(str, 0)) if str in type_counts.index else 0
+                counts = dict(zip(type_counts.index, type_counts.values))
+                str_count = int(counts.get(str, 0))
                 if num_types > 1 and str_count > 0:
                     self._schema_drift_detected = True
                     numeric = pd.to_numeric(df[col].astype(str), errors="coerce")
