@@ -281,11 +281,11 @@ def read_json_chunks(path: Path, chunksize: int = 50_000) -> Generator[pd.DataFr
                     continue
                 buf.append(line)
                 if len(buf) >= chunksize:
-                    df = pd.read_json("\n".join(buf), lines=True, dtype=False)
+                    df = pd.read_json(io.StringIO("\n".join(buf)), lines=True, dtype=False)
                     yield df.fillna("").astype(str)
                     buf = []
         if buf:
-            df = pd.read_json("\n".join(buf), lines=True, dtype=False)
+            df = pd.read_json(io.StringIO("\n".join(buf)), lines=True, dtype=False)
             yield df.fillna("").astype(str)
         return
 
