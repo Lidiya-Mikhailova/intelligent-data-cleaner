@@ -37,4 +37,5 @@ def structural_metrics(df: pd.DataFrame) -> dict:
         "type_conversion_failures": transformer.type_conversion_failures,
         "null_rate": transformer.null_rate,
         "schema_drift_detected": transformer.schema_drift_detected,
+        "conversion_report": transformer.conversion_report,
     }

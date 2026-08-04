@@ -1,3 +1,5 @@
+import warnings
+
 import pandas as pd
 import pytest
 
@@ -69,9 +71,12 @@ def test_integer_coercion(transformer):
 def test_integer_coercion_with_missing_converts_rest(transformer):
     df = pd.DataFrame({"ID": ["42", "7", "not-a-number", "13", "2"]})
     t = transformer(df)
-    result = t.transform()
+    with pytest.warns(UserWarning):
+        result = t.transform()
     assert result["ID"].notna().sum() == 4
     assert t.type_conversion_failures >= 1
+    assert t.conversion_report
+    assert any(issue["column"] == "ID" and issue["dropped"] >= 1 for issue in t.conversion_report)
 
 
 def test_float_coercion(transformer):
@@ -128,6 +133,13 @@ def test_currency_normalisation(transformer):
     assert result["Price"].iloc[0] == pytest.approx(1200.50)
 
 
+def test_eu_decimal_requires_majority(transformer):
+    df = pd.DataFrame({"Price": ["1.234,56", "2024.01.15", "hello", "world", "foo"]})
+    result = transformer(df).transform()
+    assert str(result["Price"].iloc[0]) == "1.234,56"
+    assert str(result["Price"].iloc[1]) == "2024.01.15"
+
+
 # Text cleaning
 
 
@@ -169,6 +181,14 @@ def test_metrics_defaults(transformer):
     assert t.type_conversion_failures == 0
     assert t.null_rate == 0.0
     assert not t.schema_drift_detected
+    assert t.conversion_report == []
+
+
+def test_no_warning_without_failures(transformer):
+    t = transformer(pd.DataFrame({"A": ["1", "2", "3"]}))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        t.transform()
 
 
 # Pandas fallback paths (polars unavailable)
@@ -199,9 +219,11 @@ def test_pandas_fallback_float_integers_become_int(no_polars):
 def test_pandas_fallback_partial_integer_failure_counted(no_polars):
     df = pd.DataFrame({"ID": ["1", "2", "x", "4"]})
     t = no_polars.PolarsTransformer(df)
-    result = t.transform()
+    with pytest.warns(UserWarning):
+        result = t.transform()
     assert result["ID"].notna().sum() == 3
     assert t.type_conversion_failures == 1
+    assert t.conversion_report == [{"column": "ID", "coerced_to": "numeric", "dropped": 1}]
 
 
 def test_pandas_fallback_date_parsing(no_polars):

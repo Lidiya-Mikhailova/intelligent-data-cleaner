@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, Set
+import warnings
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 
 from src.normalization.base import is_text_dtype
+from src.normalization.text import normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,9 @@ try:
 except ImportError:
     pl = None
     POLARS_AVAILABLE = False
+
+COERCION_RATIO = 0.6
+"""Minimum fraction of cells that must parse before a column is coerced."""
 
 
 def _polars_strip(expr):
@@ -72,6 +77,7 @@ class PolarsTransformer:
         self._null_count: int = 0
         self._null_rate: float = 0.0
         self._schema_drift_detected: bool = False
+        self._conversion_issues: List[Dict[str, Any]] = []
 
     # Public metrics
 
@@ -87,6 +93,15 @@ class PolarsTransformer:
     def schema_drift_detected(self) -> bool:
         return self._schema_drift_detected
 
+    @property
+    def conversion_report(self) -> List[Dict[str, Any]]:
+        """Per-column details of values lost to type coercion.
+
+        Each entry is ``{"column", "coerced_to", "dropped"}`` so SDK users can
+        see *where* data was nulled instead of only a global count.
+        """
+        return [dict(issue) for issue in self._conversion_issues]
+
     # Full pipeline
 
     def transform(self) -> pd.DataFrame:
@@ -99,6 +114,9 @@ class PolarsTransformer:
         4. Normalise numeric formats (European decimals, currency)
         5. Normalise text (Unicode cleanup, multilingual)
         6. Handle mixed-type columns
+
+        Emits a ``UserWarning`` if any cells were lost to type coercion; the
+        per-column details stay available via :attr:`conversion_report`.
         """
         df = self._pdf.copy()
         if df.empty:
@@ -109,6 +127,13 @@ class PolarsTransformer:
         df = self._normalise_numbers(df)
         df = self._clean_text_columns(df)
         df = self._handle_mixed_types(df)
+        if self._type_conversion_failures:
+            warnings.warn(
+                f"Type coercion dropped {self._type_conversion_failures} value(s); "
+                f"see conversion_report for details.",
+                UserWarning,
+                stacklevel=2,
+            )
         return df
 
     # Step 1: Null detection
@@ -146,13 +171,17 @@ class PolarsTransformer:
                     as_int = inferred.with_columns(pl.col(col).cast(pl.Int64, strict=False).alias("_cast"))
                     non_null_int = as_int.filter(pl.col("_cast").is_not_null()).height
                     total = inferred.height
-                    if total > 0 and non_null_int / total > 0.6:
+                    if total > 0 and non_null_int / total > COERCION_RATIO:
                         full_pldf = pl.DataFrame({col: _series_to_polars_string(df[col])})
                         full_pldf = full_pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                         full_pldf = full_pldf.with_columns(pl.col(col).cast(pl.Int64, strict=False))
                         pandas_col = full_pldf[col].to_pandas()
-                        failed = pandas_col.isna().sum() - df[col].isna().sum()
-                        self._type_conversion_failures += int(failed)
+                        failed = int(pandas_col.isna().sum() - df[col].isna().sum())
+                        self._type_conversion_failures += failed
+                        if failed:
+                            self._conversion_issues.append(
+                                {"column": col, "coerced_to": "int", "dropped": failed}
+                            )
                         df[col] = pandas_col
                         continue
                 except Exception as exc:
@@ -162,13 +191,17 @@ class PolarsTransformer:
                     as_float = inferred.with_columns(pl.col(col).cast(pl.Float64, strict=False).alias("_cast"))
                     non_null_float = as_float.filter(pl.col("_cast").is_not_null()).height
                     total = inferred.height
-                    if total > 0 and non_null_float / total > 0.6:
+                    if total > 0 and non_null_float / total > COERCION_RATIO:
                         full_pldf = pl.DataFrame({col: _series_to_polars_string(df[col])})
                         full_pldf = full_pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                         full_pldf = full_pldf.with_columns(pl.col(col).cast(pl.Float64, strict=False))
                         pandas_col = full_pldf[col].to_pandas()
-                        failed = pandas_col.isna().sum() - df[col].isna().sum()
-                        self._type_conversion_failures += int(failed)
+                        failed = int(pandas_col.isna().sum() - df[col].isna().sum())
+                        self._type_conversion_failures += failed
+                        if failed:
+                            self._conversion_issues.append(
+                                {"column": col, "coerced_to": "float", "dropped": failed}
+                            )
                         df[col] = pandas_col
                         continue
                 except Exception as exc:
@@ -196,9 +229,13 @@ class PolarsTransformer:
             non_null_before = df[col].notna().sum()
             non_null_after = new_col.notna().sum()
             ratio = non_null_after / max(non_null_before, 1)
-            if ratio > 0.6:
-                failed = non_null_before - non_null_after
-                self._type_conversion_failures += int(max(failed, 0))
+            if ratio > COERCION_RATIO:
+                failed = int(max(non_null_before - non_null_after, 0))
+                self._type_conversion_failures += failed
+                if failed:
+                    self._conversion_issues.append(
+                        {"column": col, "coerced_to": "numeric", "dropped": failed}
+                    )
                 df[col] = new_col
         return df
 
@@ -292,7 +329,7 @@ class PolarsTransformer:
             if non_null.empty:
                 continue
             eu_pattern = non_null.str.match(r"^\d{1,3}(\.\d{3})*,\d+$")
-            if eu_pattern.any():
+            if eu_pattern.mean() > 0.5:
                 cleaned = (
                     series.str.replace(r"\.(?=\d{3})", "", regex=True)
                     .str.replace(",", ".")
@@ -315,14 +352,8 @@ class PolarsTransformer:
     def _clean_text_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
             if is_text_dtype(df[col].dtype):
-                df[col] = df[col].apply(lambda x: self._clean_text(x) if isinstance(x, str) else x)
+                df[col] = df[col].map(lambda x: normalize_text(x) if isinstance(x, str) else x)
         return df
-
-    @staticmethod
-    def _clean_text(text: str) -> str:
-        from src.normalization.text import normalize_text
-
-        return normalize_text(text)
 
     # Step 6: Mixed-type column handling
 
@@ -330,13 +361,11 @@ class PolarsTransformer:
         for col in df.columns:
             if is_text_dtype(df[col].dtype) and not df[col].dropna().empty:
                 non_null = df[col].dropna()
-                type_counts = non_null.apply(type).value_counts()
-                num_types = len(type_counts)
-                counts = dict(zip(type_counts.index, type_counts.values))
-                str_count = int(counts.get(str, 0))
-                if num_types > 1 and str_count > 0:
+                is_str = non_null.astype(str).to_numpy() == non_null.to_numpy()
+                num_str = int(is_str.sum())
+                if 0 < num_str < len(non_null):
                     self._schema_drift_detected = True
                     numeric = pd.to_numeric(df[col].astype(str), errors="coerce")
-                    if numeric.notna().sum() > len(df) * 0.5:
+                    if numeric.notna().sum() > len(df) * COERCION_RATIO:
                         df[col] = numeric
         return df
