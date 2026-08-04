@@ -107,8 +107,7 @@ class ReportSummary:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _extract_dq_issues(row: dict) -> list[dict]:
-    raw = row.get(DQ_COLUMNS[2])
+def _parse_dq_checks_raw(raw) -> list[dict]:
     if not raw:
         return []
     if isinstance(raw, str):
@@ -119,6 +118,10 @@ def _extract_dq_issues(row: dict) -> list[dict]:
     if isinstance(raw, list):
         return raw
     return []
+
+
+def _extract_dq_issues(row: dict) -> list[dict]:
+    return _parse_dq_checks_raw(row.get(DQ_COLUMNS[2]))
 
 
 def _classify_quarantine_reason(issues: list[dict]) -> tuple[str, str, float, Optional[str]]:
@@ -147,28 +150,28 @@ def _classify_quarantine_reason(issues: list[dict]) -> tuple[str, str, float, Op
 
 
 def _count_issue_category(processed_df: pd.DataFrame, check_name: str, status: str = "fail") -> int:
-    count = 0
-    for _, row in processed_df.iterrows():
-        issues = _extract_dq_issues(row.to_dict())
-        for issue in issues:
-            if issue.get("check_name") == check_name and issue.get("status") == status:
-                count += 1
-                break
-    return count
+    if DQ_COLUMNS[2] not in processed_df.columns:
+        return 0
+    flagged = processed_df[DQ_COLUMNS[2]].map(
+        lambda raw: any(
+            i.get("check_name") == check_name and i.get("status") == status for i in _parse_dq_checks_raw(raw)
+        )
+    )
+    return int(flagged.sum())
 
 
 def _count_broken_dates(processed_df: pd.DataFrame) -> int:
-    count = 0
-    for _, row in processed_df.iterrows():
-        issues = _extract_dq_issues(row.to_dict())
-        for issue in issues:
-            if issue.get("check_name") == "field_types" and issue.get("status") in ("fail", "warn"):
-                details = issue.get("details", {})
-                val = str(details.get("value", ""))
-                if any(kw in val.lower() for kw in ("date", "/", "-")):
-                    count += 1
-                    break
-    return count
+    if DQ_COLUMNS[2] not in processed_df.columns:
+        return 0
+    flagged = processed_df[DQ_COLUMNS[2]].map(_parse_dq_checks_raw).map(
+        lambda issues: any(
+            i.get("check_name") == "field_types"
+            and i.get("status") in ("fail", "warn")
+            and any(kw in str(i.get("details", {}).get("value", "")).lower() for kw in ("date", "/", "-"))
+            for i in issues
+        )
+    )
+    return int(flagged.sum())
 
 
 def _count_suspicious_rows(quarantine_df: pd.DataFrame, invalid_df: pd.DataFrame) -> int:

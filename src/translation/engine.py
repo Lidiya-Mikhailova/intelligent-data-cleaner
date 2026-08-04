@@ -88,7 +88,7 @@ def translate_dataframe(
             continue
         logger.info("Translating column: %s -> %s", col, target)
         df[col] = df[col].astype(str).apply(
-            lambda x: engine.translate(x, target, source) if x and x.strip() else x
+            lambda x: engine.translate(x, target, source) if isinstance(x, str) and x.strip() else x
         )
 
     return df

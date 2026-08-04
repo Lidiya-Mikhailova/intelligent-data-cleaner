@@ -20,12 +20,7 @@ def _validate_record(row: dict) -> Tuple[bool, Optional[str]]:
         return False, str(e)
 
 
-def _get_dq_status(row: dict) -> Optional[str]:
-    return row.get(DQ_COLUMNS[1])
-
-
-def _get_dq_checks_summary(row: dict) -> list[dict]:
-    raw = row.get(DQ_COLUMNS[2])
+def _parse_checks(raw) -> list[dict]:
     if not raw:
         return []
     if isinstance(raw, str):
@@ -38,18 +33,9 @@ def _get_dq_checks_summary(row: dict) -> list[dict]:
     return []
 
 
-def _has_dq_critical(row: dict) -> bool:
-    checks = _get_dq_checks_summary(row)
+def _has_dq_critical(checks: list[dict]) -> bool:
     for c in checks:
         if c.get("status") == "fail" and c.get("severity") in ("error", "critical"):
-            return True
-    return False
-
-
-def _has_dq_warn(row: dict) -> bool:
-    checks = _get_dq_checks_summary(row)
-    for c in checks:
-        if c.get("status") == "warn":
             return True
     return False
 
@@ -78,18 +64,22 @@ def classify_records(
     invalid_rows: list[dict] = []
     quarantine_rows: list[dict] = []
 
-    from src.normalization.transform import PolarsTransformer
+    clean_df = strip_dq_columns(df)
+    row_records = df.to_dict("records")
+    clean_records = clean_df.to_dict("records")
+    if DQ_COLUMNS[2] in df.columns:
+        parsed_checks = df[DQ_COLUMNS[2]].map(_parse_checks).tolist()
+    else:
+        parsed_checks = [[] for _ in range(len(df))]
+    if DQ_COLUMNS[1] in df.columns:
+        dq_status_list = df[DQ_COLUMNS[1]].tolist()
+    else:
+        dq_status_list = [None] * len(df)
+    dq_critical_list = [_has_dq_critical(checks) for checks in parsed_checks]
 
-    transformer = PolarsTransformer(df)
-    _ = transformer.transform()
-
-    for _, row in df.iterrows():
-        row_dict = row.to_dict()
-
-        dq_status = _get_dq_status(row_dict)
-        dq_critical = _has_dq_critical(row_dict)
-
-        clean_row = strip_dq_columns(pd.DataFrame([row_dict])).iloc[0].to_dict()
+    for row_dict, clean_row, dq_status, dq_critical, dq_issues in zip(
+        row_records, clean_records, dq_status_list, dq_critical_list, parsed_checks
+    ):
 
         if strict:
             is_valid, error = _validate_record(clean_row)
@@ -98,7 +88,6 @@ def classify_records(
                 invalid_rows.append(row_dict)
                 continue
 
-        dq_issues = _get_dq_checks_summary(row_dict)
         dq_reasons = [f"[DQ:{c['check_name']}] {c['message']}" for c in dq_issues if c["status"] in ("warn", "fail")]
 
         if dq_critical:
