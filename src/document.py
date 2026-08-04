@@ -7,24 +7,31 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import pandas as pd
 
 from src.core.metadata import DocumentMetadata, ProcessingStep
-from src.io.ocr import OCREngine
 
 logger = logging.getLogger(__name__)
 
-FULL_PIPELINE_STAGES = ["ingest", "extract", "normalize", "clean", "deduplicate", "translate", "enrich", "export"]
+FULL_PIPELINE_STAGES = [
+    "ingest",
+    "form_detect",
+    "extract",
+    "normalize",
+    "clean",
+    "deduplicate",
+    "translate",
+    "enrich",
+    "dq",
+    "export",
+]
 
 
 class Document:
-    """Central abstraction for intelligent document processing.
+    """Fluent API for loading, cleaning, inspecting, and exporting tabular data.
 
-    Factory methods:
-        from_file, from_zip, from_text, from_dict, from_bytes, from_scan
-
-    Chainable processing methods (return self):
-        normalize, clean, deduplicate, translate, enrich, run_pipeline
-
-    Terminal methods:
-        export (returns bytes or Path), preview (returns str), report (returns str)
+    Usage:
+        doc = Document.from_file("dirty.csv")
+        doc = doc.normalize().clean().deduplicate()
+        doc = doc.remove_rows([3, 7])        # optional manual fix
+        doc.export("csv", output_path="clean.csv")
     """
 
     def __init__(
@@ -38,6 +45,39 @@ class Document:
         self._metadata.column_count = len(data.columns)
         self._metadata.columns = data.columns.tolist()
         self._last_export_result: Any = None
+        self._removed: Dict[str, pd.DataFrame] = {}
+        self._review_summary: Any = None
+        self._quarantine_df: pd.DataFrame = pd.DataFrame()
+
+    # ── Review / Quarantine API ────────────────────────────────────
+
+    @property
+    def review(self):
+        return self._review_summary
+
+    @review.setter
+    def review(self, value):
+        self._review_summary = value
+
+    @property
+    def quarantine(self) -> pd.DataFrame:
+        return self._quarantine_df.copy()
+
+    def classify(self, strict: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        from src.core.validation import classify_records
+        from src.review import ReportSummary
+
+        valid, invalid, quarantine = classify_records(self._data, strict=strict)
+        self._review_summary = ReportSummary(
+            source_file=self._metadata.source or "memory",
+            pipeline_run_id=0,
+            rows_total=len(self._data),
+            rows_valid=len(valid),
+            rows_invalid=len(invalid),
+            rows_quarantine=len(quarantine),
+        )
+        self._quarantine_df = quarantine
+        return valid, invalid, quarantine
 
     # ── Factory Methods ────────────────────────────────────────────
 
@@ -52,11 +92,7 @@ class Document:
         return Pipeline([IngestStage(path=path), ExtractStage()]).run(cls(pd.DataFrame()))
 
     @classmethod
-    def from_zip(cls, path: Union[str, Path]) -> Document:
-        return cls.from_file(path)
-
-    @classmethod
-    def from_text(cls, text: str, **meta_kwargs) -> Document:
+    def from_text(cls, text: str) -> Document:
         from src.normalization.pipeline import Pipeline
         from src.normalization.stages import ExtractStage, IngestStage
 
@@ -77,20 +113,6 @@ class Document:
         return Pipeline([IngestStage(source="bytes", data=data, format=format), ExtractStage()]).run(
             cls(pd.DataFrame())
         )
-
-    @classmethod
-    def from_scan(
-        cls,
-        path: Union[str, Path],
-        engine: Optional[Union[str, OCREngine]] = None,
-    ) -> Document:
-        from src.normalization.pipeline import Pipeline
-        from src.normalization.stages import ExtractStage, IngestStage
-
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"File not found: {path}")
-        return Pipeline([IngestStage(path=path, scan=True, engine=engine), ExtractStage()]).run(cls(pd.DataFrame()))
 
     # ── Properties ─────────────────────────────────────────────────
 
@@ -114,6 +136,68 @@ class Document:
     def is_empty(self) -> bool:
         return self._data.empty
 
+    # ── Inspection API ─────────────────────────────────────────────
+
+    @property
+    def removed(self) -> Dict[str, pd.DataFrame]:
+        return dict(self._removed)
+
+    @property
+    def duplicates(self) -> pd.DataFrame:
+        return self._removed.get("deduplicate", pd.DataFrame())
+
+    def find_duplicates(
+        self, fuzzy: bool = True, threshold: float = 85.0, subset: Optional[List[str]] = None
+    ) -> pd.DataFrame:
+        df = self._data
+        if df.empty:
+            return pd.DataFrame()
+        cols = subset or df.columns.tolist()
+        if fuzzy:
+            try:
+                import importlib.util
+
+                RAPIDFUZZ_AVAILABLE = importlib.util.find_spec("rapidfuzz") is not None
+            except (ImportError, AttributeError):
+                RAPIDFUZZ_AVAILABLE = False
+            if RAPIDFUZZ_AVAILABLE:
+                from src.normalization.deduplication import fuzzy_deduplicate
+
+                all_dupes = pd.Series(False, index=df.index)
+                for col in cols:
+                    if col in df.columns and df[col].dtype == object:
+                        values = df[col].astype(str).tolist()
+                        mapping = fuzzy_deduplicate(values, threshold)
+                        dupe_vals = {orig for orig, canon in mapping if orig != canon}
+                        all_dupes |= df[col].astype(str).isin(dupe_vals)
+                return df[all_dupes].copy()
+        from src.normalization.deduplication import normalize_key
+
+        keys = df[cols].apply(lambda row: "".join(normalize_key(str(x)) for x in row), axis=1)
+        dupe_mask = keys.duplicated(keep=False)
+        return df[dupe_mask].copy()
+
+    def suspicious(self) -> pd.DataFrame:
+        if "_dq_status" not in self._data.columns:
+            return pd.DataFrame()
+        mask = self._data["_dq_status"].isin(("warn", "fail"))
+        return self._data[mask].copy()
+
+    def remove_rows(self, indices: Union[int, List[int]]) -> Document:
+        if isinstance(indices, int):
+            indices = [indices]
+        indices = [i for i in indices if 0 <= i < len(self._data)]
+        keep = self._data.index.difference(self._data.iloc[indices].index)
+        new_doc = Document(self._data.loc[keep].reset_index(drop=True), metadata=self._metadata)
+        new_doc._removed = dict(self._removed)
+        return new_doc
+
+    def keep_rows(self, func: Callable[[pd.Series], bool]) -> Document:
+        mask = self._data.apply(func, axis=1)
+        new_doc = Document(self._data[mask].reset_index(drop=True), metadata=self._metadata)
+        new_doc._removed = dict(self._removed)
+        return new_doc
+
     # ── Pipeline Integration ───────────────────────────────────────
 
     def transform(
@@ -122,11 +206,6 @@ class Document:
         stage_name: str,
         params: Optional[Dict[str, Any]] = None,
     ) -> Document:
-        """Apply a DataFrame transformation as a pipeline stage.
-
-        Called by Pipeline stages and Document convenience methods.
-        Records the step in metadata automatically.
-        """
         before = len(self._data)
         logger.info("Pipeline stage '%s' (%d rows)", stage_name, before)
         result = func(self._data.copy())
@@ -143,163 +222,7 @@ class Document:
         )
         return self
 
-    # ── Medallion Pipeline (Bronze → Silver → Gold) ────────────────
-
-    def process(self, base_dir: Union[str, Path] = ".", formats: Optional[List[str]] = None) -> List[Path]:
-        """Run the full Medallion pipeline on this document's source file.
-
-        Processes through Bronze (raw) → Silver (VALID/INVALID/QUARANTINE)
-        → Gold (final) → Export. Requires a file-based document.
-        """
-        from src.core.cleaner import IntelligentDataCleaner
-
-        source = self._metadata.source
-        if not source or source.startswith("memory:"):
-            raise RuntimeError(
-                "Document.process() requires a file source (use Document.from_file() or Document.from_scan())"
-            )
-        fmt = self._make_formats(formats)
-        with IntelligentDataCleaner(Path(base_dir)) as cleaner:
-            return cleaner.process_file(Path(source), formats=fmt)
-
-    # ── Batch Processing ───────────────────────────────────────────
-
-    @classmethod
-    def process_all(cls, base_dir: Union[str, Path] = ".", formats: Optional[List[str]] = None) -> List[Path]:
-        """Process all supported files in the bronze/ directory."""
-        from src.core.cleaner import IntelligentDataCleaner
-
-        fmt = cls._make_formats(formats)
-        with IntelligentDataCleaner(Path(base_dir)) as cleaner:
-            return cleaner.process_all(fmt)
-
-    # ── Replay Methods ─────────────────────────────────────────────
-
-    def replay_from_silver(
-        self,
-        base_dir: Union[str, Path] = ".",
-        formats: Optional[List[str]] = None,
-    ) -> List[Path]:
-        """Re-run pipeline from Silver layer on this document's source."""
-        from src.core.cleaner import IntelligentDataCleaner
-
-        fmt = self._make_formats(formats)
-        with IntelligentDataCleaner(Path(base_dir)) as cleaner:
-            return cleaner.replay_from_silver(self._metadata.source, formats=fmt)
-
-    def reprocess_invalid(
-        self,
-        base_dir: Union[str, Path] = ".",
-        formats: Optional[List[str]] = None,
-    ) -> List[Path]:
-        """Re-process invalid records from Silver layer."""
-        from src.core.cleaner import IntelligentDataCleaner
-
-        fmt = self._make_formats(formats)
-        with IntelligentDataCleaner(Path(base_dir)) as cleaner:
-            return cleaner.reprocess_invalid(self._metadata.source, formats=fmt)
-
-    def replay_stage(
-        self,
-        stage_name: str,
-        base_dir: Union[str, Path] = ".",
-        formats: Optional[List[str]] = None,
-    ) -> List[Path]:
-        """Re-run pipeline from a specific stage checkpoint."""
-        from src.core.cleaner import IntelligentDataCleaner
-
-        fmt = self._make_formats(formats)
-        with IntelligentDataCleaner(Path(base_dir)) as cleaner:
-            return cleaner.replay_stage(self._metadata.source, stage_name, formats=fmt)
-
-    def rebuild_pipeline(
-        self,
-        base_dir: Union[str, Path] = ".",
-        formats: Optional[List[str]] = None,
-    ) -> List[Path]:
-        """Re-run pipeline from Bronze layer."""
-        from src.core.cleaner import IntelligentDataCleaner
-
-        fmt = self._make_formats(formats)
-        with IntelligentDataCleaner(Path(base_dir)) as cleaner:
-            return cleaner.rebuild_pipeline(self._metadata.source, formats=fmt)
-
-    @staticmethod
-    def _make_formats(formats: Optional[List[str]]):
-        from src.core.cleaner import OutputFormats
-
-        return OutputFormats.from_iter(formats)
-
-    # ── Infrastructure API ─────────────────────────────────────────
-
-    @staticmethod
-    def setup_logging(base_dir: Union[str, Path] = ".") -> None:
-        """Configure project-wide logging."""
-        from src.core.logging_config import setup_logging as _setup
-
-        _setup(Path(base_dir))
-
-    @staticmethod
-    def list_exporters() -> List[str]:
-        """List all available export format names."""
-        from src.exporters.registry import list_exporters as _list
-
-        return _list()
-
-    @classmethod
-    def from_config(
-        cls,
-        config_path: Union[str, Path],
-        override_input: Optional[str] = None,
-    ) -> Document:
-        """Create a Document by running a pipeline defined in a YAML/JSON config file."""
-        from src.config.loader import run_from_config
-
-        return run_from_config(Path(config_path), override_input=override_input)
-
-    @classmethod
-    def list_tables(
-        cls,
-        layer: str = "gold",
-        base_dir: Union[str, Path] = ".",
-    ) -> "pd.DataFrame":
-        """List tables in a Medallion layer (bronze/silver/gold)."""
-        from src.core.cleaner import IntelligentDataCleaner
-
-        with IntelligentDataCleaner(Path(base_dir)) as cleaner:
-            if layer == "gold":
-                return cleaner.list_gold()
-            if layer == "silver":
-                from src.database import get_silver_tables
-
-                return get_silver_tables(cleaner.conn)
-            return cleaner.conn.execute("SELECT * FROM bronze_files ORDER BY ingested_at DESC").fetchdf()
-
-    @classmethod
-    def export_table(
-        cls,
-        table_name: str,
-        base_dir: Union[str, Path] = ".",
-        formats: Optional[List[str]] = None,
-    ) -> List[Path]:
-        """Export a gold table to files."""
-        from src.core.export_service import export_data
-        from src.database import get_db_path, init_db, read_table
-
-        db_path = get_db_path(Path(base_dir))
-        conn = init_db(db_path)
-        output_dir = Path(base_dir) / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        font_dir = Path(base_dir) / "fonts" / "dejavu_sans"
-        try:
-            df = read_table(conn, table_name)
-            if df.empty:
-                return []
-            return export_data(df, output_dir, formats=formats, font_dir=font_dir, base_name=table_name)
-        finally:
-            conn.close()
-
-    # ── Convenience Methods (delegate through Pipeline engine) ─────
+    # ── Convenience Methods ────────────────────────────────────────
 
     def normalize(self) -> Document:
         return self.run_pipeline(["normalize"])
@@ -307,11 +230,11 @@ class Document:
     def clean(self) -> Document:
         return self.run_pipeline(["clean"])
 
-    def deduplicate(self, threshold: float = 85.0, fuzzy: bool = True) -> Document:
+    def deduplicate(self, threshold: float = 85.0, fuzzy: bool = True, subset: Optional[List[str]] = None) -> Document:
         from src.normalization.pipeline import Pipeline
         from src.normalization.stages import DeduplicateStage
 
-        return Pipeline([DeduplicateStage(threshold=threshold, fuzzy=fuzzy)]).run(self)
+        return Pipeline([DeduplicateStage(threshold=threshold, fuzzy=fuzzy, subset=subset)]).run(self)
 
     def translate(
         self,
@@ -330,9 +253,28 @@ class Document:
 
         return Pipeline([EnrichStage(rules=rules)]).run(self)
 
+    def validate(self, **kwargs: Any) -> Document:
+        from src.dq import DQStage
+        from src.normalization.pipeline import Pipeline
+
+        return Pipeline([DQStage(**kwargs)]).run(self)
+
+    def quality_report(self) -> dict:
+        from src.dq import DQService
+
+        report = DQService().quality_report(self._data)
+        if self._metadata.quality_metrics:
+            report["quality_metrics"] = self._metadata.quality_metrics
+        return report
+
+    @property
+    def quality_metrics(self) -> dict:
+        return dict(self._metadata.quality_metrics)
+
     # ── Pipeline Runner ────────────────────────────────────────────
 
     def run_pipeline(self, stages: Optional[List[str]] = None) -> Document:
+        from src.dq import DQStage
         from src.normalization.pipeline import FULL_PIPELINE, Pipeline
         from src.normalization.stages import (
             CleanStage,
@@ -340,6 +282,7 @@ class Document:
             EnrichStage,
             ExportStage,
             ExtractStage,
+            FormDetectStage,
             IngestStage,
             NormalizeStage,
             TranslateStage,
@@ -347,12 +290,14 @@ class Document:
 
         stage_map = {
             "ingest": IngestStage,
+            "form_detect": FormDetectStage,
             "extract": ExtractStage,
             "normalize": NormalizeStage,
             "clean": CleanStage,
             "deduplicate": DeduplicateStage,
             "translate": TranslateStage,
             "enrich": EnrichStage,
+            "dq": DQStage,
             "export": ExportStage,
         }
 
@@ -366,6 +311,20 @@ class Document:
                 pipeline.add(cls())
 
         return pipeline.run(self)
+
+    # ── Infrastructure API ─────────────────────────────────────────
+
+    @staticmethod
+    def setup_logging(base_dir: Union[str, Path] = ".") -> None:
+        from src.core.logging_config import setup_logging as _setup
+
+        _setup(Path(base_dir))
+
+    @staticmethod
+    def list_exporters() -> List[str]:
+        from src.exporters.registry import list_exporters as _list
+
+        return _list()
 
     # ── Terminal Operations ────────────────────────────────────────
 
@@ -390,7 +349,7 @@ class Document:
         return result.data or b""
 
     def preview(self, rows: int = 10, show_meta: bool = True) -> str:
-        from src.visualization.render import render_dataframe, render_metadata
+        from src.visualization import render_dataframe, render_metadata
 
         parts: List[str] = []
         if show_meta:
@@ -399,12 +358,12 @@ class Document:
         return "\n".join(parts)
 
     def report(self, validation_errors: Optional[pd.DataFrame] = None) -> str:
-        from src.visualization.reports import generate_report
+        from src.visualization import generate_report
 
         return generate_report(self._metadata, self._data, validation_errors=validation_errors)
 
     def diff(self, other: Document) -> str:
-        from src.visualization.render import render_diff
+        from src.visualization import render_diff
 
         return render_diff(self._data, other._data)
 

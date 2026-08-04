@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from src.io.writers import (
+    pdf_to_bytes,
     save_csv,
     save_excel,
     save_json,
@@ -66,6 +67,10 @@ def list_exporters() -> List[str]:
     return list(_exporter_registry.keys())
 
 
+def _export_metadata(df: pd.DataFrame, **extra: Any) -> Dict[str, Any]:
+    return {"rows": len(df), "columns": len(df.columns), **extra}
+
+
 @register_exporter
 class CSVExporter(Exporter):
     format_name = "csv"
@@ -80,7 +85,7 @@ class CSVExporter(Exporter):
             path = Path(output_path)
             save_csv(df, path)
 
-        return ExportResult(format="csv", data=bytes_data, path=path)
+        return ExportResult(format=self.format_name, data=bytes_data, path=path, metadata=_export_metadata(df))
 
 
 @register_exporter
@@ -97,7 +102,7 @@ class JSONExporter(Exporter):
             path = Path(output_path)
             save_json(df, path)
 
-        return ExportResult(format="json", data=bytes_data, path=path)
+        return ExportResult(format=self.format_name, data=bytes_data, path=path, metadata=_export_metadata(df))
 
 
 @register_exporter
@@ -114,7 +119,7 @@ class JSONLExporter(Exporter):
             path = Path(output_path)
             save_jsonl(df, path)
 
-        return ExportResult(format="jsonl", data=bytes_data, path=path)
+        return ExportResult(format=self.format_name, data=bytes_data, path=path, metadata=_export_metadata(df))
 
 
 @register_exporter
@@ -136,7 +141,7 @@ class ExcelExporter(Exporter):
             path = Path(output_path)
             save_excel(df, path)
 
-        return ExportResult(format="xlsx", data=bytes_data, path=path)
+        return ExportResult(format=self.format_name, data=bytes_data, path=path, metadata=_export_metadata(df))
 
 
 @register_exporter
@@ -154,7 +159,7 @@ class TXTExporter(Exporter):
             path = Path(output_path)
             save_txt(df, path)
 
-        return ExportResult(format="txt", data=bytes_data, path=path)
+        return ExportResult(format=self.format_name, data=bytes_data, path=path, metadata=_export_metadata(df))
 
 
 @register_exporter
@@ -169,33 +174,32 @@ class PDFExporter(Exporter):
             path = Path(output_path)
             save_pdf(df, path, font_path=font_path)
 
-        bytes_data = b""
-        if not output_path:
-            from fpdf import FPDF
+        bytes_data = pdf_to_bytes(df, font_path=font_path)
 
-            pdf = FPDF(format="A4", unit="mm")
-            pdf.add_page()
-            pdf.set_margins(10, 10, 10)
-            pdf.set_auto_page_break(auto=True, margin=15)
-            if font_path:
-                pdf.add_font("DocFont", "", str(font_path), uni=True)
-                pdf.set_font("DocFont", size=6)
-            else:
-                pdf.set_font("Arial", size=6)
-            cols = df.columns.tolist()
-            page_width = pdf.w - pdf.l_margin - pdf.r_margin
-            col_width = page_width / max(len(cols), 1)
-            for c in cols:
-                pdf.cell(col_width, 4, str(c), border=1, align="C")
-            pdf.ln(4)
-            for row in df.itertuples(index=False):
-                for v in row:
-                    safe = str(v).encode("ascii", errors="replace").decode("ascii")
-                    pdf.cell(col_width, 4, safe, border=1)
-                pdf.ln(4)
-            bytes_data = pdf.output(dest="S").encode("latin-1")
+        return ExportResult(
+            format=self.format_name, data=bytes_data, path=path, metadata=_export_metadata(df, font=bool(font_path))
+        )
 
-        return ExportResult(format="pdf", data=bytes_data, path=path)
+
+@register_exporter
+class ParquetExporter(Exporter):
+    format_name = "parquet"
+
+    def export(self, df: pd.DataFrame, output_path: Optional[Path] = None, **kwargs) -> ExportResult:
+        compression: Optional[str] = kwargs.get("compression", "snappy")
+
+        data = io.BytesIO()
+        df.to_parquet(data, index=False, compression=compression)
+        bytes_data = data.getvalue()
+
+        path = None
+        if output_path:
+            path = Path(output_path)
+            df.to_parquet(path, index=False, compression=compression)
+
+        return ExportResult(
+            format=self.format_name, data=bytes_data, path=path, metadata=_export_metadata(df, compression=compression)
+        )
 
 
 @register_exporter
@@ -215,4 +219,4 @@ class SafeCSVExporter(Exporter):
             path = Path(output_path)
             save_csv_safe(df, path)
 
-        return ExportResult(format="safe_csv", data=bytes_data, path=path)
+        return ExportResult(format=self.format_name, data=bytes_data, path=path, metadata=_export_metadata(df))

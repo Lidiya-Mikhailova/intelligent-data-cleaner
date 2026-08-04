@@ -30,6 +30,7 @@ classifiers = [
 
 dependencies = [
     "pandas>=2.0",
+    "pyarrow>=16.0",
     "numpy>=1.24",
     "pydantic>=2.0",
     "fpdf2>=2.7",
@@ -39,12 +40,12 @@ dependencies = [
     "fonttools>=4.43",
     "pillow>=10.0",
     "duckdb>=1.0",
-    "pytesseract>=0.3.10",
     "rich>=13.0",
     "ftfy>=6.0",
     "rapidfuzz>=3.0",
     "pyyaml>=6.0",
     "deep-translator>=1.11",
+    "polars>=0.20",
 ]
 
 [project.optional-dependencies]
@@ -62,7 +63,7 @@ all = [
 ]
 
 [project.scripts]
-idoc = "src.cli.app:app"
+idoc = "src.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/anomalyco/intelligent-data-cleaner"

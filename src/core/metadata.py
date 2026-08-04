@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 @dataclass
 class ProcessingStep:
     """Record of a single processing step applied to a document."""
+
     name: str
     timestamp: datetime = field(default_factory=datetime.now)
     params: Dict[str, Any] = field(default_factory=dict)
@@ -19,6 +20,7 @@ class ProcessingStep:
 @dataclass
 class DocumentMetadata:
     """Metadata for a document — source, processing history, stats."""
+
     source: Optional[str] = None
     source_format: Optional[str] = None
     source_size_bytes: int = 0
@@ -29,6 +31,7 @@ class DocumentMetadata:
     columns: List[str] = field(default_factory=list)
     processing_history: List[ProcessingStep] = field(default_factory=list)
     custom: Dict[str, Any] = field(default_factory=dict)
+    quality_metrics: Dict[str, Any] = field(default_factory=dict)
 
     def add_step(self, step: ProcessingStep) -> None:
         self.processing_history.append(step)
@@ -54,4 +57,5 @@ class DocumentMetadata:
             "columns": self.columns,
             "processing_stages": self.processing_stages,
             "custom": self.custom,
+            "quality_metrics": self.quality_metrics,
         }

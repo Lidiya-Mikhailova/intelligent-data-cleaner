@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import re
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, field_validator, model_validator
 
 
 class SilverRecord(BaseModel):
-    """Pydantic model for validating silver layer records."""
+    """Pydantic model for validating silver layer records.
+
+    Flexible enough to handle extra fields (preserved via model_config)
+    while enforcing core constraints on known fields.
+    """
 
     ID: int
     Name: str
@@ -15,6 +19,8 @@ class SilverRecord(BaseModel):
     Email: Optional[str] = None
     Address: Optional[str] = None
     Notes: Optional[str] = None
+
+    model_config = {"extra": "allow"}
 
     @model_validator(mode="before")
     @classmethod
@@ -24,6 +30,18 @@ class SilverRecord(BaseModel):
             if isinstance(val, str) and val.strip() == "":
                 values[field] = None
         return values
+
+    @field_validator("ID", mode="before")
+    @classmethod
+    def coerce_id(cls, v: Any) -> int:
+        if isinstance(v, float) and v == v:
+            return int(v)
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped:
+                return int(float(stripped))
+            raise ValueError("ID must not be empty")
+        return int(v)
 
     @field_validator("Name")
     @classmethod
@@ -84,5 +102,21 @@ def quarantine_warnings(row: dict) -> List[str]:
             if domain_part.endswith(tld):
                 warnings.append(f"Email uses suspicious TLD: {tld}")
                 break
+
+    from src.normalization.text import (
+        detect_ambiguous_date,
+        is_ocr_garbled,
+        is_partially_corrupted,
+    )
+
+    for key, value in row.items():
+        if value is None or not isinstance(value, str):
+            continue
+        if detect_ambiguous_date(value):
+            warnings.append(f"Ambiguous date format in '{key}': '{value}'")
+        if is_ocr_garbled(value):
+            warnings.append(f"OCR artifacts detected in '{key}'")
+    corruption_issues = is_partially_corrupted(row)
+    warnings.extend(corruption_issues)
 
     return warnings

@@ -153,3 +153,11 @@ fonts/
 # VS Code
 .cursorignore
 .cursorindexingignore
+
+#local SDK playground
+playground/
+
+#generated databased
+*.duckdb
+
+

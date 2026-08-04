@@ -23,19 +23,13 @@ class IngestStage(ProcessingStage):
         source: Optional[str] = None,
         data: Any = None,
         format: Optional[str] = None,
-        scan: bool = False,
-        engine: Optional[Union[str, object]] = None,
     ):
         self._path = Path(path) if path else None
         self._source = source
         self._data = data
         self._format = format
-        self._scan = scan
-        self._engine = engine
 
     def process(self, doc: Document) -> Document:
-        if self._path is not None and self._scan:
-            return self._from_scan()
         if self._path is not None:
             return self._from_file()
         if self._source == "text" and isinstance(self._data, str):
@@ -84,60 +78,28 @@ class IngestStage(ProcessingStage):
         meta.add_step(ProcessingStep(name="ingest", rows_before=0, rows_after=len(data)))
         return Doc(data, metadata=meta)
 
-    def _from_scan(self) -> Document:
-        from src.core.metadata import DocumentMetadata, ProcessingStep
-        from src.document import Document as Doc
-        from src.io.ocr import detect_scanned_pdf, get_ocr_engine, ocr_image
-        from src.io.readers import _parse_kv_lines, read_pdf_chunks
-
-        path = self._path
-        engine = self._engine
-        if isinstance(engine, str):
-            engine = get_ocr_engine(engine)
-
-        suffix = path.suffix.lower()
-        meta = DocumentMetadata(
-            source=str(path),
-            source_format=f"scan:{suffix.lstrip('.')}",
-            source_size_bytes=path.stat().st_size,
-        )
-
-        if suffix == ".pdf":
-            scan_report = detect_scanned_pdf(path)
-            if not scan_report.is_scanned:
-                logger.info("PDF is text-based, using standard extraction")
-                return self._from_file()
-
-            logger.info("Running OCR on scanned PDF: %s", path.name)
-            chunks = list(read_pdf_chunks(path))
-            data = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
-        elif suffix in (".png", ".jpg", ".jpeg", ".tiff", ".bmp"):
-            text = ocr_image(path, engine)
-            lines = [ln for ln in text.split("\n") if ln.strip()]
-            data = _parse_kv_lines(lines)
-        else:
-            from src.core.exceptions import UnsupportedFormatError
-
-            raise UnsupportedFormatError(f"Unsupported scan format: {suffix}")
-
-        meta.add_step(
-            ProcessingStep(
-                name="ingest_scan",
-                params={"engine": engine.name() if engine else "tesseract"},
-                rows_before=0,
-                rows_after=len(data),
-            )
-        )
-        return Doc(data, metadata=meta)
-
     def _from_text(self) -> Document:
+        import io
+
+        import pandas as pd
+
         from src.core.metadata import DocumentMetadata, ProcessingStep
         from src.document import Document as Doc
-        from src.io.readers import _parse_kv_lines
+        from src.io.readers import _detect_separator, _parse_kv_lines
 
-        lines = [ln for ln in self._data.split("\n") if ln.strip()]
-        df = _parse_kv_lines(lines)
-        meta = DocumentMetadata(source="memory:text", source_format="txt")
+        text = self._data.strip()
+        first_line = text.split("\n", 1)[0] if text else ""
+        has_sep = _detect_separator(text)
+        is_csv = has_sep and "," in first_line and ":" not in first_line and "=" not in first_line
+
+        if is_csv:
+            df = pd.read_csv(io.StringIO(text), dtype=str, on_bad_lines="skip").fillna("")
+            meta = DocumentMetadata(source="memory:text", source_format="csv")
+        else:
+            lines = [ln for ln in text.split("\n") if ln.strip()]
+            df = _parse_kv_lines(lines)
+            meta = DocumentMetadata(source="memory:text", source_format="txt")
+
         meta.add_step(ProcessingStep(name="ingest", rows_before=0, rows_after=len(df)))
         return Doc(df, metadata=meta)
 
@@ -187,6 +149,45 @@ class IngestStage(ProcessingStage):
         return Doc(df, metadata=meta)
 
 
+class FormDetectStage(ProcessingStage):
+    name = "form_detect"
+
+    def process(self, doc: Document) -> Document:
+        from src.forms import detect_form, extract_form
+
+        if doc.data.empty:
+            return doc
+
+        source_lines = []
+        if "Field" in doc.data.columns and "Value" in doc.data.columns:
+            source_lines = (
+                doc.data["SourceLine"].dropna().astype(str).tolist()
+                if "SourceLine" in doc.data.columns
+                else doc.data["Field"].dropna().astype(str).tolist()
+            )
+        else:
+            col = doc.data.columns[0]
+            source_lines = doc.data[col].dropna().astype(str).tolist()
+
+        if not source_lines:
+            return doc
+
+        form_type = detect_form(source_lines)
+        if form_type is None:
+            return doc.transform(lambda df: df, "form_detect")
+
+        logger.info("FormDetectStage: detected %s, running form-specific extraction", form_type)
+        parsed = extract_form(source_lines, form_type)
+        if not parsed.empty:
+            from src.core.metadata import ProcessingStep
+            from src.document import Document as Doc
+
+            doc.metadata.add_step(ProcessingStep(name="form_detect", rows_before=len(doc), rows_after=len(parsed)))
+            return Doc(parsed, metadata=doc.metadata)
+
+        return doc.transform(lambda df: df, "form_detect")
+
+
 class ExtractStage(ProcessingStage):
     name = "extract"
 
@@ -218,10 +219,14 @@ class NormalizeStage(ProcessingStage):
 
     def process(self, doc: Document) -> Document:
         from src.normalization.text import normalize_text
+        from src.normalization.transform import PolarsTransformer
 
         def _normalize(df: pd.DataFrame) -> pd.DataFrame:
+            transformer = PolarsTransformer(df)
+            df = transformer.transform()
             for col in df.columns:
-                df[col] = df[col].astype(str).apply(normalize_text)
+                if df[col].dtype == object:
+                    df[col] = df[col].astype(str).apply(normalize_text)
             return df
 
         return doc.transform(
@@ -234,38 +239,66 @@ class NormalizeStage(ProcessingStage):
 class CleanStage(ProcessingStage):
     name = "clean"
 
-    def process(self, doc: Document) -> Document:
-        from src.normalization.structural import normalize_dataframe
+    def __init__(self, structural_only: bool = False):
+        self.structural_only = structural_only
 
-        return doc.transform(normalize_dataframe, "clean")
+    def process(self, doc: Document) -> Document:
+        from src.normalization.structural import normalize_dataframe, structural_metrics
+
+        def _clean(df: pd.DataFrame) -> pd.DataFrame:
+            result = normalize_dataframe(df)
+            metrics = structural_metrics(df)
+            doc.metadata.quality_metrics.update(metrics)
+            return result
+
+        return doc.transform(
+            _clean,
+            "clean",
+            {"structural_only": self.structural_only},
+        )
 
 
 class DeduplicateStage(ProcessingStage):
     name = "deduplicate"
 
-    def __init__(self, threshold: float = 85.0, fuzzy: bool = True):
+    def __init__(self, threshold: float = 85.0, fuzzy: bool = False, subset: Optional[List[str]] = None):
         self.threshold = threshold
         self.fuzzy = fuzzy
+        self.subset = subset
 
     def process(self, doc: Document) -> Document:
+        removed: pd.DataFrame = pd.DataFrame()
+
         def _deduplicate(df: pd.DataFrame) -> pd.DataFrame:
+            nonlocal removed
+            cols = self.subset or df.columns.tolist()
             if self.fuzzy:
                 from src.normalization.deduplication import fuzzy_deduplicate
 
                 mask = pd.Series(True, index=df.index)
-                for col in df.columns:
-                    if df[col].dtype == object:
+                for col in cols:
+                    if col in df.columns and df[col].dtype == object:
                         values = df[col].astype(str).tolist()
                         mapping = fuzzy_deduplicate(values, self.threshold)
                         keep = {orig for orig, canon in mapping if orig == canon}
                         mask &= df[col].astype(str).isin(keep)
+                removed = df[~mask].copy().reset_index(drop=True)
                 return df[mask].reset_index(drop=True)
             else:
-                from src.normalization.deduplication import exact_deduplicate
+                from src.normalization.deduplication import normalize_key
 
-                return exact_deduplicate(df)
+                keys = df[cols].apply(
+                    lambda row: "".join(normalize_key(str(x)) for x in row),
+                    axis=1,
+                )
+                dupe_mask = keys.duplicated(keep="first")
+                removed = df[dupe_mask].copy().reset_index(drop=True)
+                return df[~dupe_mask].copy().reset_index(drop=True)
 
-        return doc.transform(_deduplicate, "deduplicate", {"threshold": self.threshold, "fuzzy": self.fuzzy})
+        result = doc.transform(_deduplicate, "deduplicate", {"threshold": self.threshold, "fuzzy": self.fuzzy})
+        if not removed.empty:
+            result._removed["deduplicate"] = removed
+        return result
 
 
 class TranslateStage(ProcessingStage):

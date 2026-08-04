@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 import zipfile
 from pathlib import Path
 from typing import List
@@ -29,17 +30,39 @@ NUMERIC_COLS = {"ID", "Age"}
 MAX_COL_WIDTH = 60
 
 
+def _display_width(s: str) -> int:
+    """Display width of a string (CJK / fullwidth chars count as 2)."""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in s)
+
+
+def _pad(s: str, width: int, side: str = "left") -> str:
+    current = _display_width(s)
+    if current > width:
+        result = ""
+        w = 0
+        for ch in s:
+            cw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+            if w + cw > width - 1:
+                break
+            w += cw
+            result += ch
+        return result + "…"
+    if current == width:
+        return s
+    padding = " " * (width - current)
+    return padding + s if side == "right" else s + padding
+
+
 def _col_widths(df: pd.DataFrame) -> list[int]:
-    return [min(max(df[c].astype(str).map(len).max(), len(c)) + 2, MAX_COL_WIDTH) for c in df.columns]
+    return [
+        min(max(df[c].astype(str).map(_display_width).max(), _display_width(c)) + 2, MAX_COL_WIDTH) for c in df.columns
+    ]
 
 
 def _align(v: object, width: int, col_name: str) -> str:
     s = str(v)
-    if len(s) > width:
-        s = s[: width - 1] + "…"
-    if col_name in NUMERIC_COLS:
-        return s.rjust(width)
-    return s.ljust(width)
+    side = "right" if col_name in NUMERIC_COLS else "left"
+    return _pad(s, width, side)
 
 
 def save_csv(df: pd.DataFrame, path: Path) -> None:
@@ -50,7 +73,7 @@ def save_csv(df: pd.DataFrame, path: Path) -> None:
     with open(path, "w", encoding="utf-8") as f:
         header = sep.join(_align(c, w, c) for c, w in zip(df.columns, widths))
         f.write(header + "\n")
-        f.write("─" * len(header) + "\n")
+        f.write("─" * _display_width(header) + "\n")
 
         for _, row in df.iterrows():
             line = sep.join(_align(row[c], w, c) for c, w in zip(df.columns, widths))
@@ -99,7 +122,7 @@ def save_txt(df: pd.DataFrame, path: Path) -> None:
     with open(path, "w", encoding="utf-8") as f:
         header = sep.join(_align(c, w, c) for c, w in zip(df.columns, widths))
         f.write(header + "\n")
-        f.write("═" * len(header) + "\n")
+        f.write("═" * _display_width(header) + "\n")
 
         for _, row in df.iterrows():
             line = sep.join(_align(row[c], w, c) for c, w in zip(df.columns, widths))
@@ -124,8 +147,8 @@ def save_jsonl(df: pd.DataFrame, path: Path) -> None:
     logger.info("Saved JSONL: %s", path)
 
 
-def save_pdf(df: pd.DataFrame, path: Path, font_path: Path | None = None) -> None:
-    """Save DataFrame as PDF."""
+def _build_pdf(df: pd.DataFrame, font_path: Path | None = None) -> FPDF:
+    """Build and return an FPDF object from a DataFrame."""
     pdf = FPDF(format="A4", unit="mm")
     pdf.add_page()
     pdf.set_margins(10, 10, 10)
@@ -178,7 +201,24 @@ def save_pdf(df: pd.DataFrame, path: Path, font_path: Path | None = None) -> Non
             pdf.cell(col_width, 4, _pdf_safe_text(v), border=1)
         pdf.ln(4)
 
+    return pdf
+
+
+def save_pdf(df: pd.DataFrame, path: Path, font_path: Path | None = None) -> None:
+    """Save DataFrame as PDF."""
+    pdf = _build_pdf(df, font_path=font_path)
     pdf.output(str(path))
+
+
+def pdf_to_bytes(df: pd.DataFrame, font_path: Path | None = None) -> bytes:
+    """Render DataFrame as PDF and return as bytes."""
+    pdf = _build_pdf(df, font_path=font_path)
+    raw = pdf.output(dest="S")
+    if isinstance(raw, bytearray):
+        return bytes(raw)
+    if isinstance(raw, bytes):
+        return raw
+    return raw.encode("latin-1")
 
 
 def save_zip(files: List[Path], output_path: Path) -> Path:

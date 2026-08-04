@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 import re
 from pathlib import Path
@@ -7,20 +8,31 @@ from typing import Generator, List, Optional, Tuple
 
 import pandas as pd
 
-from src.io.ocr import detect_scanned_pdf, read_scanned_pdf
-
 logger = logging.getLogger(__name__)
 
 
+def _detect_separator(header: str) -> Optional[str]:
+    candidates = [("|", "|"), (",", ","), (";", ";"), ("\t", "\t")]
+    best = None
+    best_count = 0
+    for sep, char in candidates:
+        count = header.count(char)
+        if count > best_count:
+            best_count = count
+            best = sep
+    return best
+
+
 def _looks_like_csv(text: str) -> bool:
-    """Detect if text content looks like CSV (comma/semicolon/tab separated with consistent columns)."""
+    """Detect if text content looks like CSV (comma/semicolon/tab/pipe separated with consistent columns)."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if len(lines) < 2:
         return False
 
+    candidate_seps = [",", ";", "\t", "|"]
     candidate_lines = []
     for line in lines:
-        sep_counts = [line.count(","), line.count(";"), line.count("\t")]
+        sep_counts = [line.count(s) for s in candidate_seps]
         if max(sep_counts) > 0:
             candidate_lines.append(line)
         if len(candidate_lines) >= 10:
@@ -29,21 +41,66 @@ def _looks_like_csv(text: str) -> bool:
     if len(candidate_lines) < 2:
         return False
 
-    for sep_idx, sep_name in [(0, ","), (1, ";"), (2, "\t")]:
-        counts = [line.count(sep_name) for line in candidate_lines]
+    for sep in candidate_seps:
+        counts = [line.count(sep) for line in candidate_lines]
         if all(c > 0 for c in counts) and max(counts) - min(counts) <= 3:
             return True
     return False
 
 
+def _prepare_csv_text(path: Path) -> Tuple[str, Optional[str]]:
+    """Read and pre-process CSV text: strip outer quotes, normalize separators.
+
+    Returns ``(cleaned_text, detected_separator)``.
+    Separator normalisation (``< > ; : |`` → ``,``) is only applied when the
+    detected separator is ``,`` (or none).  Pipe-delimited files keep ``|``.
+    """
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    lines = raw.splitlines()
+    if not lines:
+        return "", None
+
+    processed = []
+    for line in lines:
+        s = line.strip()
+        if len(s) >= 2 and s[0] == '"' and s[-1] == '"' and '"' not in s[1:-1]:
+            s = s[1:-1]
+        processed.append(s)
+
+    sep = _detect_separator(processed[0])
+
+    if sep == "," or sep is None:
+        header = processed[0]
+        n_cols = header.count(",") + 1
+        for i in range(1, len(processed)):
+            line = processed[i]
+            if not line:
+                continue
+            if line.count(",") >= n_cols - 1:
+                continue
+            for ch in "<>;:|":
+                line = line.replace(ch, ",")
+            if line.count(",") < n_cols - 1 and "." in line:
+                line = re.sub(r"(?<=\d)\.(?=[A-Za-z])", ",", line)
+                line = re.sub(r"(?<=[A-Za-z])\.(?=\d)", ",", line)
+            processed[i] = line
+
+    return "\n".join(processed), sep
+
+
 def load_csv_chunks(path: Path, chunksize: int = 50_000) -> Generator[pd.DataFrame, None, None]:
     """
-    Read CSV in chunks. Use a stable separator strategy.
+    Read CSV in chunks. Pre-processes text to strip outer quotes from lines
+    and normalizes common separator characters (``< > ; : |``) in dirty rows.
     Strips whitespace from column names and cell values.
     """
+    text, detected_sep = _prepare_csv_text(path)
+    if not text:
+        return
+
     for chunk in pd.read_csv(
-        path,
-        sep=None,  # auto-detect; ok for real CSV
+        io.StringIO(text),
+        sep=detected_sep,
         engine="python",
         dtype=str,
         chunksize=chunksize,
@@ -51,7 +108,7 @@ def load_csv_chunks(path: Path, chunksize: int = 50_000) -> Generator[pd.DataFra
         skipinitialspace=True,
     ):
         chunk.columns = [c.strip() for c in chunk.columns]
-        chunk = chunk.apply(lambda col: col.str.strip() if col.dtype == object else col)
+        chunk = chunk.map(lambda x: x.strip() if isinstance(x, str) else x)
         yield chunk.fillna("")
 
 
@@ -64,7 +121,7 @@ def _parse_kv_lines(lines: List[str]) -> pd.DataFrame:
     Supports multiline values: lines after a key are appended until next key.
     """
 
-    kv_re = re.compile(r"^\s*([A-Za-z][A-Za-z0-9 _/\-\.\(\)]{0,60})\s*[:=\-]\s*(.+?)\s*$")
+    kv_re = re.compile(r"^\s*([A-Za-z][A-Za-z0-9 _/\.\(\)]{0,60})\s*[:=]\s*(.+?)\s*$")
 
     rows: List[Tuple[str, str, str]] = []
     current_key: Optional[str] = None
@@ -122,7 +179,7 @@ def read_txt_chunks(path: Path, chunksize: int = 50_000) -> Generator[pd.DataFra
         import tempfile
 
         lines = text.splitlines()
-        csv_lines = [line for line in lines if "," in line or ";" in line or "\t" in line]
+        csv_lines = [line for line in lines if any(s in line for s in (",", ";", "\t", "|"))]
         if not csv_lines:
             yield pd.DataFrame()
             return
@@ -152,23 +209,9 @@ def read_txt_chunks(path: Path, chunksize: int = 50_000) -> Generator[pd.DataFra
 def read_pdf_chunks(path: Path) -> Generator[pd.DataFrame, None, None]:
     """
     Read PDF page-by-page and parse text into Field | Value.
-    Works for text-based PDFs and scanned PDFs (via OCR).
+    Works for text-based PDFs.
     """
     import pdfplumber
-
-    scan_report = detect_scanned_pdf(path)
-
-    if scan_report.is_scanned:
-        logger.info("Detected scanned PDF: %s (scanned ratio: %.2f)", path.name, scan_report.scanned_ratio)
-        pages_data = read_scanned_pdf(path)
-        for page_data in pages_data:
-            lines = [ln for ln in page_data["text"].split("\n") if ln.strip()]
-            if not lines:
-                continue
-            df = _parse_kv_lines(lines)
-            if not df.empty:
-                yield df.fillna("")
-        return
 
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
