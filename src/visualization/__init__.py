@@ -231,7 +231,7 @@ def generate_report(
     lines.append("  Columns")
     lines.append("-" * 60)
     for col in df.columns:
-        non_null = df[col].astype(str).apply(lambda x: x.strip() != "").sum()
+        non_null = df[col].astype(str).apply(lambda x: isinstance(x, str) and x.strip() != "").sum()
         lines.append(f"  \u2022 {col}: {non_null}/{len(df)} non-empty")
     if validation_errors is not None and not validation_errors.empty:
         lines.append("")

@@ -120,10 +120,6 @@ def _parse_dq_checks_raw(raw) -> list[dict]:
     return []
 
 
-def _extract_dq_issues(row: dict) -> list[dict]:
-    return _parse_dq_checks_raw(row.get(DQ_COLUMNS[2]))
-
-
 def _classify_quarantine_reason(issues: list[dict]) -> tuple[str, str, float, Optional[str]]:
     for issue in issues:
         name = issue.get("check_name", "")
@@ -176,6 +172,40 @@ def _count_broken_dates(processed_df: pd.DataFrame) -> int:
 
 def _count_suspicious_rows(quarantine_df: pd.DataFrame, invalid_df: pd.DataFrame) -> int:
     return len(quarantine_df) + len(invalid_df)
+
+
+def _build_quarantine_records(quarantine_df: pd.DataFrame, invalid_df: pd.DataFrame) -> List[QuarantineRecord]:
+    records: List[QuarantineRecord] = []
+    for offset, df in ((0, quarantine_df), (len(quarantine_df), invalid_df)):
+        checks_col = (
+            df[DQ_COLUMNS[2]].map(_parse_dq_checks_raw).tolist()
+            if DQ_COLUMNS[2] in df.columns
+            else [[] for _ in range(len(df))]
+        )
+        rows = df.to_dict("records")
+        for idx, (row_dict, issues) in enumerate(zip(rows, checks_col)):
+            reason, category, confidence, suggestion = _classify_quarantine_reason(issues)
+            if offset == 0:
+                reasons_raw = row_dict.get("quarantine_reasons", "")
+                if reasons_raw:
+                    reason = reasons_raw
+                data = {k: v for k, v in row_dict.items() if k not in DQ_COLUMNS}
+            else:
+                err = row_dict.get("validation_error", "")
+                if err:
+                    reason = err[:200]
+                data = {k: v for k, v in row_dict.items() if k not in DQ_COLUMNS and k != "validation_error"}
+            records.append(
+                QuarantineRecord(
+                    row_index=offset + idx,
+                    data=data,
+                    reason=reason,
+                    category=category,
+                    confidence=confidence,
+                    suggested_normalization=suggestion,
+                )
+            )
+    return records
 
 
 # Build Report
@@ -272,41 +302,7 @@ def build_report_summary(
     dq_metrics: DataQualityMetrics,
     stages: list[dict],
 ) -> ReportSummary:
-    quarantine_records: List[QuarantineRecord] = []
-    for idx, (_, row) in enumerate(quarantine_df.iterrows()):
-        row_dict = row.to_dict()
-        issues = _extract_dq_issues(row_dict)
-        reason, category, confidence, suggestion = _classify_quarantine_reason(issues)
-        reasons_raw = row_dict.get("quarantine_reasons", "")
-        if reasons_raw:
-            reason = reasons_raw
-        quarantine_records.append(
-            QuarantineRecord(
-                row_index=idx,
-                data={k: v for k, v in row_dict.items() if k not in DQ_COLUMNS},
-                reason=reason,
-                category=category,
-                confidence=confidence,
-                suggested_normalization=suggestion,
-            )
-        )
-    for idx, (_, row) in enumerate(invalid_df.iterrows()):
-        row_dict = row.to_dict()
-        issues = _extract_dq_issues(row_dict)
-        reason, category, confidence, suggestion = _classify_quarantine_reason(issues)
-        err = row_dict.get("validation_error", "")
-        if err:
-            reason = err[:200]
-        quarantine_records.append(
-            QuarantineRecord(
-                row_index=len(quarantine_df) + idx,
-                data={k: v for k, v in row_dict.items() if k not in DQ_COLUMNS and k != "validation_error"},
-                reason=reason,
-                category=category,
-                confidence=confidence,
-                suggested_normalization=suggestion,
-            )
-        )
+    quarantine_records = _build_quarantine_records(quarantine_df, invalid_df)
     return ReportSummary(
         source_file=source_file,
         pipeline_run_id=0,
