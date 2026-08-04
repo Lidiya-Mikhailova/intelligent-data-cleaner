@@ -1,90 +1,152 @@
 # Intelligent Data Cleaner
 
-A modular Python project for cleaning, normalizing, and deduplicating semi-structured data.
+**загрузил → почистил → поправил → выбрал формат → выгрузил**
 
-The pipeline processes CSV, TXT, JSON, JSONL, and text-based PDF inputs, applies text normalization and strict deduplication, and exports cleaned data to multiple formats.
-
-## Features
-
-- Text normalization (Unicode normalization, control character removal, formatting)
-- Strict duplicate removal across rows
-- Chunk-based processing for large files
-- Inputs: CSV, TXT, JSON, JSONL, PDF (text-based)
-- Outputs: CSV, SAFE_CSV, XLSX, TXT, PDF, JSON, JSONL
-- Modular architecture for easy extension
-- Optional auto-open of generated files (`--open`)
-
-## Notes / Limitations
-
-- Scanned PDFs (image-based) require OCR. The OCR/scanner step is optional and may be added later.
-
-## Example
-
-This repository contains a small, safe example input file:
-
-- `examples/input/sample.txt`
-
-### Run with the example
-
-1.Copy the example file to `raw_data/`:
 ```bash
-cp examples/input/sample.txt raw_data/
+pip install -e ".[dev,all]"
 ```
 
-2.Run the pipeline:
+## Library API
+
+```python
+from src.document import Document
+```
+
+### 1. Load
+
+```python
+doc = Document.from_file("bronze/dirty.csv")
+doc = Document.from_file("data.txt")
+doc = Document.from_file("data.json")
+doc = Document.from_dict([{"Name": "John", "Age": 30}])
+doc = Document.from_text("Name: John\nAge: 30")
+```
+
+### 2. Clean
+
+```python
+doc = doc.normalize()           # encoding, whitespace, unicode
+doc = doc.clean()               # structural cleanup
+doc = doc.deduplicate()         # fuzzy dedup (default, rapidfuzz)
+doc = doc.deduplicate(fuzzy=True, threshold=85.0, subset=["Name", "Age"])
+doc = doc.translate(target="en")
+doc = doc.validate()            # DQ checks
+```
+
+### 3. Inspect & Fix
+
+```python
+# Посмотреть дубликаты (не удаляет!)
+dupes = doc.find_duplicates(fuzzy=False, subset=["Name", "Age"])
+print(dupes)
+
+# Удалить конкретные строки
+doc = doc.remove_rows([3, 7])
+doc = doc.keep_rows(lambda r: r["Name"] != "")
+
+# Посмотреть что удалил deduplicate
+print(doc.duplicates)
+print(doc.removed)  # строки, удалённые на этапе deduplicate
+
+# Классификация (VALID / INVALID / QUARANTINE)
+valid, invalid, quarantine = doc.classify()
+r = doc.review
+print(f"valid={r.rows_valid}, invalid={r.rows_invalid}, quarantine={r.rows_quarantine}")
+
+# Подозрительные строки (DQ warnings)
+print(doc.suspicious())
+print(doc.quarantine)
+```
+
+### 4. Export
+
+```python
+doc.export("csv", output_path="clean.csv")        # → Path
+doc.export("json", output_path="clean.json")
+doc.export("xlsx", output_path="clean.xlsx")
+doc.export("txt", output_path="clean.txt")
+doc.export("pdf", output_path="clean.pdf")
+doc.export("jsonl", output_path="clean.jsonl")
+doc.export("parquet", output_path="clean.parquet", compression="snappy")
+data = doc.export("csv")                           # → bytes
+```
+
+> Примечание: `doc.export("csv", output_path=...)` сохраняет CSV в выровненном
+> табличном виде (удобно для чтения человеком, но не стандартный CSV). Для
+> стандартного CSV используйте возврат байтов `data = doc.export("csv")`.
+
+### Preview
+
+```python
+print(doc.preview(rows=10))
+print(doc.report())
+```
+
+## CLI
+
 ```bash
-python -m src.cli.runner
+idoc process input.csv                  # clean + dedup + export
+idoc process input.csv --no-deduplicate
+idoc process input.csv --translate en -e csv
+idoc convert input.pdf --to csv         # без очистки
+idoc info input.csv
+idoc formats
 ```
 
-3.Check generated files:
+## Полный пример
+
+```python
+from src.document import Document
+
+doc = Document.from_file("bronze/dirty.csv")
+doc = doc.normalize().clean()
+
+# смотрим дубликаты
+print(doc.find_duplicates(fuzzy=False))
+
+# удаляем мусорную строку 7
+doc = doc.remove_rows(7)
+
+# дедуплицируем остальное
+doc = doc.deduplicate()
+
+# смотрим что удалилось
+print(doc.duplicates)
+
+# экспорт
+doc.export("csv", output_path="output/clean.csv")
+```
+
+## Directory Layout
+
+```
+src/
+├── document.py          # Document — единственный public класс
+├── core/                # metadata, validation, exceptions
+├── normalization/       # pipeline, stages, text, deduplication
+├── exporters/           # registry + 8 exporters
+├── dq/                  # quality checks
+├── review/              # модели отчётов и карантина
+├── io/                  # readers, writers
+├── validation/          # Pydantic SilverRecord
+├── translation/         # deep-translator engine
+├── forms/               # W-2, W-4, 1099
+├── visualization/       # preview rendering
+└── cli/                 # Typer app
+```
+
+## Tests
+
 ```bash
-ls -la output/
+python -m pytest tests/ -v        # All
+python -m pytest tests/ -q        # Quick
+python -m pytest tests/test_normalization.py -v
+python -m pytest tests/test_deduplication.py -v
+python -m pytest tests/test_validation.py -v
+python -m pytest tests/test_dataframe.py -v
+python -m pytest tests/test_dq.py -v
 ```
 
-4.Check logs (generated locally):
-```logs/data_cleaner.log```
+## License
 
-Usage
-
-Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-Put your input files into raw_data/, then run:
-```bash
-python -m src.cli.runner
-```
-
-Select output 
-
-Generate only specific output
-```bash
-python -m src.cli.runner --formats xlsx txt
-```
-Generate CSV + JSON +JSONL
-```bash
-python -m src.cli.runner --formats csv json jsonl
-```
-
-
-Project structure
-```
-intelligent-data-cleaner
-├── src/
-│   ├── cli/            # entry point
-│   ├── core/           # orchestration
-│   ├── io/             # readers/writers/openers (+ scanner utils)
-│   └── processing/
-├── examples/
-│   └── input/
-│       └── sample.txt
-├── raw_data/           # local input (ignored)
-├── output/             # local output (ignored)
-├── logs/               # runtime logs (tracked only with .gitkeep; *.log ignored)
-├── README.md
-├── requirements.txt
-└── .gitignore
-
-```
-
-
+MIT
