@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.normalization.transform import NULL_PATTERNS, PolarsTransformer
+from src.normalization.transform import NULL_PATTERNS, PolarsTransformer, _series_to_polars_string
 
 
 @pytest.fixture
@@ -10,6 +10,19 @@ def transformer():
         return PolarsTransformer(df)
 
     return _make
+
+
+# Polars bridge
+
+
+def test_series_to_polars_string_preserves_nulls():
+    result = _series_to_polars_string(pd.Series(["1", None, "3", float("nan")]))
+    assert result == ["1", None, "3", None]
+
+
+def test_series_to_polars_string_handles_non_scalar_cells():
+    result = _series_to_polars_string(pd.Series([{"a": 1}, [1, 2], "x"]))
+    assert result == ["{'a': 1}", "[1, 2]", "x"]
 
 
 # Empty / trivial inputs

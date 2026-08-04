@@ -29,6 +29,18 @@ def _polars_strip(expr):
         return expr.str.strip_chars()
 
 
+def _series_to_polars_string(series) -> list:
+    """Convert a pandas Series into a list of strings/None for a Polars column.
+
+    Avoids ``DataFrame.fillna(None)`` which raises ``ValueError`` on pandas 2.x
+    while preserving nulls as Polars nulls. Stringification is vectorised via
+    the ``string`` dtype, so mixed or non-scalar cells (lists, dicts) cannot
+    break the conversion; only a cheap identity pass normalises ``pd.NA``.
+    """
+    values = series.astype("string").tolist()
+    return [None if v is pd.NA else v for v in values]
+
+
 NULL_PATTERNS: Set[str] = {
     "",
     "null",
@@ -41,11 +53,6 @@ NULL_PATTERNS: Set[str] = {
     "undefined",
     "nil",
     "unknown",
-    "null",
-    "none",
-    "na",
-    "n/a",
-    "nan",
 }
 
 
@@ -131,7 +138,7 @@ class PolarsTransformer:
             series = df[col].dropna()
             sample = series.head(100)
             try:
-                pldf = pl.from_pandas(sample.to_frame(name=col))
+                pldf = pl.DataFrame({col: _series_to_polars_string(sample)})
                 # Polars schema inference
                 inferred = pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                 # Try integer
@@ -140,7 +147,7 @@ class PolarsTransformer:
                     non_null_int = as_int.filter(pl.col("_cast").is_not_null()).height
                     total = inferred.height
                     if total > 0 and non_null_int / total > 0.6:
-                        full_pldf = pl.from_pandas(df[[col]].fillna(None))
+                        full_pldf = pl.DataFrame({col: _series_to_polars_string(df[col])})
                         full_pldf = full_pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                         full_pldf = full_pldf.with_columns(pl.col(col).cast(pl.Int64, strict=False))
                         pandas_col = full_pldf[col].to_pandas()
@@ -148,15 +155,15 @@ class PolarsTransformer:
                         self._type_conversion_failures += int(failed)
                         df[col] = pandas_col
                         continue
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("int coercion skipped for %r: %s", col, exc)
                 # Try float
                 try:
                     as_float = inferred.with_columns(pl.col(col).cast(pl.Float64, strict=False).alias("_cast"))
                     non_null_float = as_float.filter(pl.col("_cast").is_not_null()).height
                     total = inferred.height
                     if total > 0 and non_null_float / total > 0.6:
-                        full_pldf = pl.from_pandas(df[[col]].fillna(None))
+                        full_pldf = pl.DataFrame({col: _series_to_polars_string(df[col])})
                         full_pldf = full_pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                         full_pldf = full_pldf.with_columns(pl.col(col).cast(pl.Float64, strict=False))
                         pandas_col = full_pldf[col].to_pandas()
@@ -164,9 +171,10 @@ class PolarsTransformer:
                         self._type_conversion_failures += int(failed)
                         df[col] = pandas_col
                         continue
-                except Exception:
-                    pass
-            except Exception:
+                except Exception as exc:
+                    logger.debug("float coercion skipped for %r: %s", col, exc)
+            except Exception as exc:
+                logger.debug("schema inference skipped for %r: %s", col, exc)
                 continue
         return df
 
@@ -220,7 +228,7 @@ class PolarsTransformer:
             if not is_text_dtype(df[col].dtype) or df[col].dropna().empty:
                 continue
             try:
-                pldf = pl.from_pandas(df[[col]].fillna(None))
+                pldf = pl.DataFrame({col: _series_to_polars_string(df[col])})
                 pldf = pldf.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
                 best_fmt: Optional[str] = None
                 best_count = 0
@@ -231,14 +239,13 @@ class PolarsTransformer:
                         if valid > best_count:
                             best_count = valid
                             best_fmt = fmt
-                    except Exception:
-                        continue
+                    except Exception as exc:
+                        logger.debug("date format %r failed for %r: %s", fmt, col, exc)
                 if best_fmt and best_count > len(df) * 0.3:
-                    full = pl.from_pandas(df[[col]].fillna(None))
-                    full = full.with_columns(_polars_strip(pl.col(col).cast(pl.String)))
-                    parsed = full.with_columns(pl.col(col).str.to_date(format=best_fmt, strict=False))
+                    parsed = pldf.with_columns(pl.col(col).str.to_date(format=best_fmt, strict=False))
                     df[col] = parsed[col].to_pandas()
-            except Exception:
+            except Exception as exc:
+                logger.debug("date parsing skipped for %r: %s", col, exc)
                 continue
         return df
 
